@@ -1,0 +1,16 @@
+/* App-level base styles. FDS tokens only. */
+
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--background-surface-subtle);
+  color: var(--text-neutral-normal);
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+
+/* Visually hidden but read by screen readers (the module's live region and canvas outline). */
+.r-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* While a lazy page loads. */
+.app-loading { display: grid; place-items: center; min-height: calc(var(--spacing-64) * 5); }

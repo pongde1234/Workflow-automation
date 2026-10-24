@@ -1,0 +1,320 @@
+/*
+ * iosense Workflow Automation — layout only. FDS tokens only (G1, G11, G17):
+ * no hex/rgb/px/ms literals, no new custom properties, no z-index numbers
+ * (layering inside the canvas follows DOM order). Geometry that changes at
+ * runtime (positions, zoom) is set inline by the components.
+ */
+
+/* ── Shared ── */
+
+.io-form { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-form p, .io-node p, .io-condition h3, .io-form h3 { margin: 0; }
+.io-muted { color: var(--text-neutral-muted); }
+
+/* Node-type tile: the category's faded background with its icon colour (Trigger notice, Logic brand, Action positive). */
+.io-tile {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--spacing-32);
+  height: var(--spacing-32);
+  border-radius: var(--radius-m);
+  /* One brand tint for every node: no colour per kind, since green, red and orange mean run status. */
+  background: var(--background-brand-faded);
+  color: var(--text-brand-normal);
+}
+.io-tile[data-size="xs"] { width: var(--spacing-20); height: var(--spacing-20); border-radius: var(--radius-s); }
+.io-tile[data-size="sm"] { width: var(--spacing-24); height: var(--spacing-24); border-radius: var(--radius-s); }
+.io-tile[data-size="lg"] { width: var(--spacing-48); height: var(--spacing-48); border-radius: var(--radius-l); }
+
+.io-trigger-cell { display: inline-flex; align-items: center; gap: var(--spacing-8); }
+
+/* ── Workflow list: toolbar, cards ── */
+.io-list { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-list__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-12); }
+.io-list__search { flex: 0 1 calc(var(--spacing-64) * 5); min-width: calc(var(--spacing-64) * 3); }
+.io-list__filters { display: flex; flex-wrap: wrap; gap: var(--spacing-8); }
+.io-list__end { display: flex; align-items: center; gap: var(--spacing-12); margin-inline-start: auto; }
+/* Filled tabs always fill their strip; this strip is two icons wide. */
+.io-list__layout { width: calc(var(--spacing-36) * 2 + var(--spacing-8)); }
+.io-wf-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--spacing-64) * 5)), 1fr));
+  gap: var(--spacing-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.io-wf-card { display: flex; flex-direction: column; gap: var(--spacing-12); }
+.io-wf-card__desc {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.io-wf-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-12); }
+.io-wf-card__run { display: inline-flex; align-items: center; gap: var(--spacing-8); }
+.io-center { display: grid; place-items: center; height: 100%; padding: var(--spacing-24); }
+
+.io-details { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing-64) * 2), 1fr)); gap: var(--spacing-12); margin: 0; }
+.io-details dt { color: var(--text-neutral-muted); }
+.io-details dd { margin: 0; }
+
+/* ── Workflow page: header bar, then the body (FDS S2 canvas page) ── */
+
+.io-workflow { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.io-workflow__stage { position: relative; flex: 1 1 auto; min-height: 0; }
+
+/* The workflow's bar above the canvas: no title or back button (the shell's trail names the page and leads back). */
+.io-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-8);
+  padding: var(--spacing-8) var(--spacing-16);
+  border-bottom: var(--border-width-thin) solid var(--border-neutral-default);
+}
+.io-controls__group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-8); }
+.io-controls__group:last-of-type { margin-inline-start: auto; justify-content: flex-end; }
+.io-controls__active { display: inline-flex; align-items: center; gap: var(--spacing-8); }
+.io-controls__save { display: inline-flex; align-items: center; gap: var(--spacing-4); white-space: nowrap; color: var(--text-neutral-muted); margin-inline-start: var(--spacing-8); }
+/* The save status spaces itself, so its live region adds no gap while empty. */
+.io-controls__group--status { gap: 0; }
+.io-controls__save[data-state="saved"] svg { color: var(--text-positive-normal); }
+
+.io-history { display: flex; flex-direction: column; gap: var(--spacing-16); }
+
+/* ── Canvas ── */
+
+/* The canvas runs on React Flow (structural CSS only); everything visible below is FDS tokens. */
+.io-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background-color: var(--background-surface-subtle);
+}
+.io-canvas .react-flow__pane { cursor: default; }
+.io-canvas .react-flow__pane.dragging { cursor: grabbing; }
+.io-canvas .react-flow__node { cursor: default; }
+.io-canvas .react-flow__node.draggable.dragging { cursor: grabbing; }
+/* React Flow's credit link (kept, as its authors ask unless you subscribe to React Flow Pro), in FDS colours. */
+.io-canvas .react-flow__attribution { background: transparent; padding: var(--spacing-2) var(--spacing-8); }
+.io-canvas .react-flow__attribution a { color: var(--text-neutral-muted); }
+
+.io-edge {
+  fill: none;
+  stroke: var(--border-neutral-highlighted);
+  stroke-width: var(--border-width-thick);
+  vector-effect: non-scaling-stroke;
+}
+.io-edge[data-selected] { stroke: var(--border-brand-default); stroke-width: var(--border-width-thicker); }
+.io-edge[data-run="taken"] { stroke: var(--border-brand-default); stroke-width: var(--border-width-thicker); }
+.io-edge[data-run="untaken"] { stroke: var(--border-neutral-default); stroke-dasharray: var(--spacing-4) var(--spacing-4); }
+.io-edge--preview { stroke: var(--border-brand-default); stroke-dasharray: var(--spacing-4) var(--spacing-4); }
+/* While a test runs, dashes flow along the link into the node being worked on (reduced motion: FDS's central rule stops it). */
+.io-edge[data-run="flowing"] {
+  stroke: var(--border-brand-default);
+  stroke-width: var(--border-width-thicker);
+  stroke-dasharray: var(--spacing-8) var(--spacing-4);
+  animation: io-flow var(--global-duration-moderate) var(--global-easing-linear) infinite;
+}
+@keyframes io-flow { to { stroke-dashoffset: calc(var(--spacing-12) * -1); } }
+.io-edge__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: var(--spacing-12);
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.io-node { position: relative; }
+.io-node__body { display: flex; flex-direction: column; gap: var(--spacing-8); }
+.io-node__summary {
+  color: var(--text-neutral-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.io-node__row {
+  padding-block: var(--spacing-4);
+  color: var(--text-neutral-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.io-node__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-8); min-height: var(--spacing-24); }
+.io-node__reason { color: var(--text-negative-normal); }
+
+/*
+ * Ports: the canvas's own composite (FDS has no graph handle). Solid dots
+ * centred on the card's edge and painted behind it (DOM order), so only the
+ * outer half shows. Both take the line's neutral colour; only connecting lights them up.
+ */
+.io-node .io-port {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  width: var(--spacing-12);
+  height: var(--spacing-12);
+  border: none;
+  border-radius: var(--radius-max);
+  background: var(--border-neutral-highlighted);
+  transform: translate(-50%, -50%);
+}
+.io-node .io-port--in { left: 0; right: auto; top: 50%; }
+.io-node .io-port--out { left: 100%; right: auto; top: 50%; }
+.io-node .io-port { cursor: crosshair; }
+/* A larger grab area than the dot (it sits half behind the card): connections can start from either end. */
+.io-port::after { content: ""; position: absolute; inset: calc(var(--spacing-8) * -1); border-radius: var(--radius-max); }
+/* While connecting from an output, every input lights up faintly; the port under the pointer turns solid (or red if refused). */
+.io-canvas[data-connecting="from-output"] .io-node .io-port--in { background: var(--background-brand-faded-highlighted); }
+.io-canvas[data-connecting] .io-node .io-port[data-hint="valid"] { background: var(--background-brand-default); }
+.io-canvas[data-connecting] .io-node .io-port[data-hint="invalid"] { background: var(--background-negative-default); }
+/* A single output sits halfway down the card; a Switch's outputs get their row's top inline. */
+.io-port-add { position: absolute; left: calc(100% + var(--spacing-16)); top: 50%; transform: translateY(-50%); }
+/* A short line from a free output to its "+". */
+.io-port-stub {
+  position: absolute;
+  left: calc(100% + var(--spacing-6));
+  top: 50%;
+  width: calc(var(--spacing-12) - var(--spacing-2));
+  height: var(--border-width-thick);
+  background: var(--border-neutral-highlighted);
+  transform: translateY(-50%);
+}
+
+/* "+" on a connection, centred on the line; the button's own white fill covers it. */
+.io-edge-add { position: absolute; left: 0; top: 0; pointer-events: all; }
+.io-edge-add__center { position: relative; display: inline-flex; transform: translate(-50%, -50%); }
+/* "×" sits just above the "+" without moving it (the run into the next card is too short for it to sit beside). */
+.io-edge-add__remove { position: absolute; left: 50%; bottom: calc(100% + var(--spacing-4)); transform: translateX(-50%); }
+
+@media (pointer: coarse) {
+  .io-edge__hit { stroke-width: var(--spacing-24); }
+  .io-port::after { inset: calc(var(--spacing-16) * -1); }
+}
+
+.io-canvas__move { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: var(--spacing-8); padding-top: var(--spacing-8); pointer-events: all; }
+.io-canvas__start { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--spacing-16); pointer-events: none; }
+.io-canvas__start > * { pointer-events: auto; }
+.io-start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-8);
+  /* Room for the three triggers side by side. */
+  width: min(100%, calc(var(--spacing-64) * 10 + var(--spacing-32)));
+  text-align: center;
+}
+.io-start h2, .io-start p { margin: 0; }
+.io-start__choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing-64) * 3), 1fr));
+  gap: var(--spacing-16);
+  width: 100%;
+  padding-top: var(--spacing-16);
+}
+.io-start__choice { display: flex; flex-direction: column; align-items: flex-start; gap: var(--spacing-8); text-align: left; }
+.io-canvas__zoom {
+  position: absolute;
+  left: var(--spacing-16);
+  bottom: var(--spacing-16);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-8);
+}
+/* Read-only: the level is shown, not clicked. Tabular figures so it doesn't jitter as it changes. */
+.io-canvas__zoom-level { color: var(--text-neutral-subtle); font-variant-numeric: tabular-nums; }
+
+/* "Add a node" window: search, then two columns of node types under section headings. */
+.io-picker { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-picker__columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-16); align-items: start; }
+.io-picker__columns[data-narrow] { grid-template-columns: minmax(0, 1fr); }
+.io-picker__empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--spacing-8); padding-block: var(--spacing-16); }
+.io-picker__empty p { margin: 0; }
+
+/* ── Run logs, docked under the canvas ── */
+
+.io-logs {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  border-top: var(--border-width-thin) solid var(--border-neutral-default);
+  background: var(--background-surface-default);
+}
+.io-logs[data-resizing] { user-select: none; cursor: row-resize; }
+/* The top edge drags the panel's height; a short grip shows where (always on touch, on hover or focus with a mouse). */
+.io-logs__resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--spacing-6) * -1);
+  height: var(--spacing-12);
+  cursor: row-resize;
+  touch-action: none;
+}
+.io-logs__resize::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--spacing-32);
+  height: var(--spacing-4);
+  border-radius: var(--radius-max);
+  background: var(--border-neutral-highlighted);
+  transform: translate(-50%, -50%);
+  opacity: 0;
+}
+.io-logs__resize:hover::after, .io-logs[data-resizing] .io-logs__resize::after { opacity: 1; }
+.io-logs__resize:focus-visible { outline: none; }
+.io-logs__resize:focus-visible::after { opacity: 1; box-shadow: var(--focus-ring-shadow); }
+@media (pointer: coarse) {
+  .io-logs__resize { top: calc(var(--spacing-12) * -1); height: var(--spacing-24); }
+  .io-logs__resize::after { opacity: 1; }
+}
+.io-logs h2, .io-logs h3 { margin: 0; white-space: nowrap; }
+/* Spacing in the panel comes from its gaps; a paragraph's browser margin doubled them. */
+.io-logs p { margin: 0; }
+.io-logs__head { display: flex; align-items: center; gap: var(--spacing-16); padding: var(--spacing-8) var(--spacing-16); min-width: 0; }
+.io-logs__state { display: flex; align-items: center; gap: var(--spacing-12); flex: 1 1 auto; min-width: 0; }
+.io-logs__state > :first-child { flex: 0 0 auto; min-width: calc(var(--spacing-64) * 2); }
+.io-logs__state > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-logs__actions { display: flex; align-items: center; gap: var(--spacing-8); flex: 0 0 auto; }
+.io-logs__body {
+  display: grid;
+  grid-template-columns: calc(var(--spacing-64) * 4) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+  border-top: var(--border-width-thin) solid var(--border-neutral-default);
+}
+.io-logs[data-narrow] .io-logs__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); }
+.io-logs__list, .io-logs__detail { min-height: 0; overflow: hidden; }
+/* FDS ScrollArea leaves overflow and height to the consumer: its scroller fills the cell and scrolls. */
+.io-logs__scroll { height: 100%; overflow-y: auto; }
+/* The node list scrolls itself: the cell's one row gives the list's wrapper a height, the list fills it and keeps its own 8px padding. */
+.io-logs__list { display: grid; grid-template-rows: minmax(0, 1fr); border-right: var(--border-width-thin) solid var(--border-neutral-default); }
+.io-logs__nodes { height: 100%; }
+.io-logs[data-narrow] .io-logs__list { border-right: none; border-bottom: var(--border-width-thin) solid var(--border-neutral-default); }
+.io-logs[data-narrow] .io-logs__state > span { display: none; }
+.io-logs__detail-inner { display: flex; flex-direction: column; gap: var(--spacing-16); padding: var(--spacing-16); }
+.io-logs__detail-head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-12); }
+.io-logs__detail-title { display: flex; flex-direction: column; gap: var(--spacing-4); min-width: 0; }
+.io-logs__detail-title h3 { overflow: hidden; text-overflow: ellipsis; }
+.io-logs__switch { width: calc(var(--spacing-64) * 3); }
+
+/* ── Node drawer ── */
+
+.io-condition { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-condition__head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-8); }
+.io-schedule-summary { display: flex; flex-direction: column; gap: var(--spacing-4); }
+
