@@ -80,7 +80,8 @@ function WorkflowCard({ row, on }: { row: Row; on: RowHandlers }) {
         <CardHeaderLeading title={row.name} subtitle={row.trigger} prefix={row.triggerType ? <NodeTile type={row.triggerType} /> : undefined} />
         <CardHeaderTrailing visual={menu} />
       </CardHeader>
-      <CardBody>
+      {/* The body fills the card, so every card's status row sits on its bottom edge. */}
+      <CardBody className="io-wf-card__body">
         <div className="io-wf-card">
           {row.description && <p className="io-wf-card__desc io-muted BodySmallRegular">{row.description}</p>}
           <div className="io-wf-card__meta">

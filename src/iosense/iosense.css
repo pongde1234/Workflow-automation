@@ -40,12 +40,16 @@
 .io-wf-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--spacing-64) * 5)), 1fr));
+  /* Every row as tall as the tallest card, so all cards are the same size. */
+  grid-auto-rows: 1fr;
   gap: var(--spacing-16);
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.io-wf-card { display: flex; flex-direction: column; gap: var(--spacing-12); }
+/* The card is a flex column; its body takes the spare height and the status row sits at the bottom. */
+.io-wf-card__body { flex: 1 1 auto; display: flex; }
+.io-wf-card { display: flex; flex-direction: column; flex: 1 1 auto; gap: var(--spacing-12); }
 .io-wf-card__desc {
   margin: 0;
   display: -webkit-box;
@@ -53,7 +57,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.io-wf-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-12); }
+.io-wf-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-12); margin-block-start: auto; }
 .io-wf-card__run { display: inline-flex; align-items: center; gap: var(--spacing-8); }
 .io-center { display: grid; place-items: center; height: 100%; padding: var(--spacing-24); }
 
