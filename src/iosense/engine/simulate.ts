@@ -4,7 +4,7 @@ import type {
   SwitchNode, TriggerVariable, WfNode, WorkOrderNode,
 } from '../domain/types';
 import { DEFAULT_HANDLE, OUT_HANDLE } from '../domain/types';
-import { isActionType } from '../domain/nodeTypes';
+import { isActionType, isTriggerType } from '../domain/nodeTypes';
 import { WEEKDAYS, triggerVariables } from '../domain/variables';
 import { edgeFrom, flowOrder, getNode, getTrigger, reachable, reachableFrom } from './graph';
 import { resolveRecipients } from './email';
@@ -239,6 +239,8 @@ export async function runSimulation(input: SimulationInput): Promise<Execution> 
   const set = (id: string, patch: Partial<NodeResult>) => results.set(id, { ...results.get(id)!, ...patch });
 
   let failed: WfNode | undefined;
+  /** Nodes that failed but were set to carry on: the run still completes. */
+  const softFailures: WfNode[] = [];
   let cur: WfNode | undefined = trigger;
   if (cur) set(cur.id, { status: 'queued' });
   emit();
@@ -248,8 +250,14 @@ export async function runSimulation(input: SimulationInput): Promise<Execution> 
     emit();
     if (stepMs > 0) await clock.sleep(stepMs);
 
+    const settings = isTriggerType(cur.type) ? undefined : cur.settings;
     let r: StepResult;
-    switch (cur.type) {
+    if (settings?.disabled) {
+      // Disabled: nothing runs, the run carries on as if the node weren't there (a Switch takes Default).
+      r = cur.type === 'switch'
+        ? { status: 'success', message: 'Disabled, so Default ran.', handle: DEFAULT_HANDLE, takenLabel: 'Default' }
+        : ok('Disabled: passed its input straight on.');
+    } else switch (cur.type) {
       case 'ioForms': r = ok('Form submission received.', scopeOut(vars, values)); break;
       case 'scheduler': r = ok(`Ran ${formatRunTime(Number(input.triggerData.firedAt))} (simulated).`, scopeOut(vars, values)); break;
       case 'deviceAlert': r = runDeviceAlert(cur, input.triggerData, scopeOut(vars, values)); break;
@@ -261,14 +269,24 @@ export async function runSimulation(input: SimulationInput): Promise<Execution> 
       case 'report': r = runReport(cur, ctx, exec.startedAt); break;
     }
 
+    // Retrying can't fix a problem in the data, so every attempt fails the same way; the message says how many were made.
+    const attempts = r.status === 'failed' && settings?.onFailure === 'retry' ? 1 + (settings.retries ?? 2) : undefined;
+    if (attempts) r = { ...r, message: `Tried ${attempts} times. ${r.message}` };
+    const carriesOn = r.status === 'failed' && settings?.onFailure === 'continue';
+    if (carriesOn) {
+      softFailures.push(cur);
+      r = { ...r, message: `${r.message} Carried on with the next step.` };
+    }
+
     path.push(cur.id);
     set(cur.id, {
-      status: r.status, message: r.message, durationMs: simulatedMs(cur.type, input.execId, cur.id),
+      status: settings?.disabled ? 'skipped' : r.status, message: r.message, durationMs: settings?.disabled ? 0 : simulatedMs(cur.type, input.execId, cur.id) * (attempts ?? 1),
+      ...(attempts ? { attempts } : {}),
       ...(r.takenLabel ? { takenHandle: r.handle, takenLabel: r.takenLabel } : {}),
       ...(r.field ? { field: r.field } : {}),
       ...(r.output !== undefined ? { output: r.output } : {}),
     });
-    if (r.status === 'failed') { failed = cur; break; }
+    if (r.status === 'failed' && !carriesOn) { failed = cur; break; }
 
     const next = edgeFrom(g, cur.id, r.handle);
     cur = next ? getNode(g, next.target) : undefined;
@@ -291,8 +309,11 @@ export async function runSimulation(input: SimulationInput): Promise<Execution> 
     exec.failedNodeId = failed.id;
     exec.summary = `Failed at ${failed.name}: ${shortReason(results.get(failed.id)!.message ?? '')}`;
   } else {
-    const done = actionsDone(path.map((id) => getNode(g, id)!.type).filter(isActionType));
-    exec.summary = done ? `Completed: ${done} simulated` : 'Completed';
+    const done = actionsDone(path.filter((id) => results.get(id)!.status === 'success').map((id) => getNode(g, id)!.type).filter(isActionType));
+    const soft = softFailures.length;
+    exec.summary = soft
+      ? `Completed with ${soft} failed ${soft === 1 ? 'step' : 'steps'} (${softFailures.map((n) => n.name).join(', ')})`
+      : done ? `Completed: ${done} simulated` : 'Completed';
   }
   const final: Execution = { ...exec, nodes: order.map((id) => results.get(id)!), path: [...path] };
   input.onUpdate?.(final);

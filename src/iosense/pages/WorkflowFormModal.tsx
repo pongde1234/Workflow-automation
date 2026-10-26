@@ -1,22 +1,25 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { Button, Modal, ModalBody, ModalFooter, ModalHeader, TextArea, TextInput } from '@faclon-labs/fds';
+import { Button, LinkButton, Modal, ModalBody, ModalFooter, ModalHeader, TextArea, TextInput } from '@faclon-labs/fds';
+import { LayoutTemplate } from 'lucide-react';
 
 export interface WorkflowDraft { name: string; description: string }
 
 interface WorkflowFormModalProps {
-  mode: 'create' | 'rename';
+  mode: 'create' | 'edit';
   isOpen: boolean;
   /** Lives in the parent: a Modal unmounts on close, and typed text must survive Cancel. */
   draft: WorkflowDraft;
   onDraftChange: (d: WorkflowDraft) => void;
   onSubmit: (d: WorkflowDraft) => void;
   onDismiss: () => void;
+  /** Create only: leave this form for the template gallery. */
+  onTemplates?: () => void;
 }
 
 const MAX_NAME = 80;
 
-/** Create a workflow, or rename one (FormGroup pattern P1 inside a Modal). */
-export function WorkflowFormModal({ mode, isOpen, draft, onDraftChange, onSubmit, onDismiss }: WorkflowFormModalProps) {
+/** Create a workflow, or edit one's name and description (FormGroup pattern P1 inside a Modal). */
+export function WorkflowFormModal({ mode, isOpen, draft, onDraftChange, onSubmit, onDismiss, onTemplates }: WorkflowFormModalProps) {
   const formId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string>();
@@ -40,8 +43,8 @@ export function WorkflowFormModal({ mode, isOpen, draft, onDraftChange, onSubmit
   };
 
   return (
-    <Modal isOpen={isOpen} onDismiss={dismiss} size={mode === 'create' ? 'md' : 'sm'} initialFocusRef={nameRef}>
-      <ModalHeader title={mode === 'create' ? 'Create workflow' : 'Rename workflow'} />
+    <Modal isOpen={isOpen} onDismiss={dismiss} size="md" initialFocusRef={nameRef}>
+      <ModalHeader title={mode === 'create' ? 'Create workflow' : 'Edit workflow'} />
       <ModalBody>
         <form id={formId} className="io-form" onSubmit={submit} noValidate>
           <TextInput
@@ -58,17 +61,20 @@ export function WorkflowFormModal({ mode, isOpen, draft, onDraftChange, onSubmit
             validationState={error ? 'error' : 'none'}
             errorText={error}
           />
-          {mode === 'create' && (
-            <TextArea
-              label="Description"
-              helpText="Optional. Shown under the name in the list."
-              maxCharacters={200}
-              numberOfLines={2}
-              value={draft.description}
-              onChange={({ value }) => onDraftChange({ ...draft, description: value ?? '' })}
-            />
-          )}
+          <TextArea
+            label="Description"
+            helpText="Optional. Shown under the name in the list."
+            maxCharacters={200}
+            numberOfLines={2}
+            value={draft.description}
+            onChange={({ value }) => onDraftChange({ ...draft, description: value ?? '' })}
+          />
         </form>
+        {mode === 'create' && onTemplates && (
+          <span className="io-form__alt">
+            <LinkButton label="Start from a template instead" icon={<LayoutTemplate size={12} />} onClick={() => { setError(undefined); onTemplates(); }} />
+          </span>
+        )}
       </ModalBody>
       <ModalFooter>
         <Button variant="primary" tone="neutral" label="Cancel" onClick={dismiss} />

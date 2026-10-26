@@ -4,6 +4,7 @@ import {
 } from '@faclon-labs/fds';
 import type { EmailNode } from '../domain/types';
 import { errorProps, useInsertValue, type NodeFormProps } from './fields';
+import { MessagePreview } from './MessagePreview';
 
 export function EmailForm({ node, ctx, errorFor, touch, onConfig }: NodeFormProps<EmailNode>) {
   const c = node.config;
@@ -88,6 +89,7 @@ export function EmailForm({ node, ctx, errorFor, touch, onConfig }: NodeFormProp
         />
       </div>
 
+      <MessagePreview texts={{ Subject: c.subject, Message: c.body }} />
       <p className="io-muted BodySmallRegular">Emails are simulated in this prototype. Nothing is sent.</p>
     </>
   );

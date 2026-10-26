@@ -164,6 +164,8 @@ export function validateWorkflow(g: Graph, ctx: ValidationContext): Issue[] {
     if (trigger && n.id !== trigger.id && !live.has(n.id) && triggers.every((t) => t.id !== n.id)) {
       push('warning', 'Not connected to the trigger, so it never runs.', undefined, 'unreachable');
     }
+    // A disabled node doesn't run, so what it's missing can wait until it's switched back on.
+    if (n.settings?.disabled && !isTriggerType(n.type)) continue;
     switch (n.type) {
       case 'ioForms':
         if (!n.config.formId) push('error', 'Choose a form.', 'formId');

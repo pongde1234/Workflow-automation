@@ -2,7 +2,7 @@ import { createContext, useContext, type KeyboardEvent } from 'react';
 
 export type NodeMenuAction =
   | { kind: 'add'; handle: string }
-  | { kind: 'connect' } | { kind: 'move' } | { kind: 'delete' };
+  | { kind: 'connect' } | { kind: 'move' } | { kind: 'toggleDisabled' } | { kind: 'delete' };
 
 /**
  * What nodes and edges on the canvas can ask the canvas to do. Provided once

@@ -4,15 +4,21 @@ import { DEFAULT_HANDLE } from '../domain/types';
 import { SEED_DIRECTORY, seedExecutions, seedWorkflows } from '../seed/seed';
 import { searchNodeTypes } from '../domain/nodeTypes';
 import { nodeSummary } from '../canvas/summary';
-import { canConnect, flowOrder, reachable } from './graph';
-import { addCondition, connect, removeCondition, removeNode } from './graphOps';
+import { canConnect, flowOrder, getTrigger, reachable } from './graph';
+import { addCondition, connect, removeCondition, removeNode, withFreshIds } from './graphOps';
+import { WORKFLOW_TEMPLATES } from '../templates/templates';
+import { draftWorkflow } from '../ai/draftWorkflow';
+import { replayFrame } from '../ui/runs';
 import { evaluate } from './operators';
 import { defaultSchedulerConfig, formatTime, nextRun, summarizeSchedule, toCron } from './schedule';
 import { invalidAddresses, parseAddresses } from './email';
 import { invalidPhones, isValidPhone } from './phone';
 import { blockingIssues, validateWorkflow } from './validate';
 import { defaultTestData, deviceAlertData, runSimulation } from './simulate';
-import { freeSpot, insertOnEdge, placeAfter } from './layout';
+import { estimateSize, freeSpot, insertOnEdge, placeAfter, tidyLayout } from './layout';
+import { changesText, graphChanges } from './diff';
+import { dailyCounts, failuresSince, weekOverWeek } from './stats';
+import { recentReadings } from './readings';
 
 const NOW = new Date(2026, 9, 23, 10, 0).getTime();
 const ctx = { ...SEED_DIRECTORY, now: NOW };
@@ -308,5 +314,236 @@ describe('seed', () => {
 
   it('connects every seeded node to its trigger', () => {
     for (const w of wfs) expect(reachable(w.graph).size).toBe(w.graph.nodes.length);
+  });
+
+  it('fills a month of history where failures are the exception and say why', async () => {
+    const runs = await seedExecutions(NOW, wfs);
+    const DAY = 86_400_000;
+    expect(runs.every((e) => e.startedAt <= NOW && e.startedAt > NOW - 31 * DAY)).toBe(true);
+    // Every active workflow has history, and the last week is busy.
+    for (const w of wfs.filter((x) => x.status === 'active')) expect(runs.some((e) => e.workflowId === w.id), w.id).toBe(true);
+    expect(runs.filter((e) => e.startedAt > NOW - 7 * DAY).length).toBeGreaterThan(30);
+    expect(runs.some((e) => e.workflowId === 'wf_diesel')).toBe(false);
+    const failed = runs.filter((e) => e.status === 'failed');
+    expect(failed.length).toBeGreaterThan(5);
+    expect(failed.length / runs.length).toBeLessThan(0.1);
+    for (const e of failed) expect(e.summary).toMatch(/^Failed at /);
+    // The chiller's mistyped number only failed before the fix 12 days ago.
+    const chiller = runs.filter((e) => e.workflowId === 'wf_chiller');
+    expect(chiller.filter((e) => e.status === 'failed').every((e) => e.startedAt < NOW - 12 * DAY)).toBe(true);
+    expect(chiller.filter((e) => e.startedAt > NOW - 12 * DAY).every((e) => e.status === 'success')).toBe(true);
+  });
+});
+
+describe('unpublished changes', () => {
+  it('finds the edited node in the seeded workflow with unpublished changes', () => {
+    const w = wfs.find((x) => x.id === 'wf_quality')!;
+    const c = graphChanges(w.graph, w.published!.graph);
+    expect([...c.byNode]).toEqual([['q_e1', 'edited']]);
+    expect(changesText(c)).toBe('1 edited');
+  });
+
+  it('counts new and removed nodes, and ignores moves', () => {
+    const w = wfs.find((x) => x.id === 'wf_breakdown')!;
+    const moved: Graph = { ...w.graph, nodes: w.graph.nodes.map((n) => ({ ...n, position: { x: n.position.x + 48, y: n.position.y } })) };
+    expect(graphChanges(moved, w.graph).byNode.size).toBe(0);
+    const removed = removeNode(w.graph, 'bd_e3');
+    const extra = { ...w.graph.nodes[4], id: 'bd_new' } as WfNode;
+    const changed = { ...removed, nodes: [...removed.nodes, extra] };
+    const c = graphChanges(changed, w.graph);
+    expect(c.byNode.get('bd_new')).toBe('new');
+    expect(c.byNode.get('bd_s')).toBe('edited'); // its Default output no longer leads anywhere
+    expect(c.removed).toBe(1);
+    expect(changesText(c)).toBe('1 edited · 1 new · 1 removed');
+  });
+});
+
+describe('run stats', () => {
+  it('counts runs per day and compares this week with the last', async () => {
+    const runs = await seedExecutions(NOW, wfs);
+    const days = dailyCounts(runs, NOW, 7);
+    expect(days).toHaveLength(7);
+    const week = weekOverWeek(runs, NOW);
+    expect(days.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(week.current.runs + runs.filter((e) => e.startedAt === NOW).length);
+    expect(week.current.successRate).toBeGreaterThan(80);
+    expect(failuresSince(runs, NOW - 30 * 86_400_000).every((e) => e.status === 'failed')).toBe(true);
+  });
+});
+
+describe('device readings', () => {
+  it('gives 24 hours of readings every 15 minutes, the same each time', () => {
+    const a = recentReadings('d_comp3', 'temperature', NOW);
+    expect(a).toHaveLength(96);
+    expect(recentReadings('d_comp3', 'temperature', NOW)).toEqual(a);
+    expect(recentReadings('d_unknown', 'x', NOW)).toEqual([]);
+  });
+});
+
+describe('tidy up', () => {
+  const sizes = (g: Graph) => Object.fromEntries(g.nodes.map((n) => [n.id, estimateSize(n)]));
+
+  it('lays every sample workflow out left to right, without overlaps, keeping the trigger in place', () => {
+    for (const w of wfs) {
+      const s = sizes(w.graph);
+      const g = tidyLayout(w.graph, s);
+      const at = (id: string) => g.nodes.find((n) => n.id === id)!;
+      for (const e of g.edges) expect(at(e.target).position.x, `${w.id}: ${e.id}`).toBeGreaterThan(at(e.source).position.x);
+      for (const a of g.nodes) {
+        for (const b of g.nodes) {
+          if (a.id >= b.id) continue;
+          const apart = a.position.x + s[a.id].w <= b.position.x || b.position.x + s[b.id].w <= a.position.x
+            || a.position.y + s[a.id].h <= b.position.y || b.position.y + s[b.id].h <= a.position.y;
+          expect(apart, `${w.id}: ${a.id} and ${b.id} overlap`).toBe(true);
+        }
+      }
+      const t = getTrigger(w.graph)!;
+      const moved = getTrigger(g)!;
+      expect(Math.abs(moved.position.x - t.position.x)).toBeLessThanOrEqual(12);
+      expect(Math.abs(moved.position.y - t.position.y)).toBeLessThanOrEqual(12);
+    }
+  });
+
+  it('untangles a scattered workflow and leaves its links alone', () => {
+    const w = wfs.find((x) => x.id === 'wf_breakdown')!;
+    const scattered = { ...w.graph, nodes: w.graph.nodes.map((n, i) => ({ ...n, position: { x: (i % 2) * 40, y: i * 13 } })) };
+    const g = tidyLayout(scattered, sizes(scattered));
+    expect(g.edges).toEqual(scattered.edges);
+    expect(new Set(g.nodes.map((n) => n.position.x)).size).toBe(3);
+  });
+});
+
+describe('templates', () => {
+  it('every template validates with no errors or warnings', () => {
+    for (const t of WORKFLOW_TEMPLATES) {
+      const issues = validateWorkflow(t.build(), { ...SEED_DIRECTORY, now: NOW });
+      expect(issues.map((i) => `${i.severity}: ${i.message}`), t.id).toEqual([]);
+    }
+  });
+
+  it('fresh ids make a separate copy that still runs', async () => {
+    let n = 0;
+    const t = WORKFLOW_TEMPLATES.find((x) => x.id === 'breakdown')!;
+    const g = withFreshIds(t.build(), (p) => `${p}_${++n}`);
+    const original = t.build();
+    expect(g.nodes.map((x) => x.id).some((id) => original.nodes.some((o) => o.id === id))).toBe(false);
+    expect(g.edges).toHaveLength(original.edges.length);
+    const sw = g.nodes.find((x) => x.type === 'switch')!;
+    const condId = sw.type === 'switch' ? sw.config.conditions[0].id : '';
+    expect(g.edges.some((e) => e.source === sw.id && e.sourceHandle === condId)).toBe(true);
+    expect(validateWorkflow(g, { ...SEED_DIRECTORY, now: NOW })).toEqual([]);
+  });
+});
+
+describe('assistant drafts', () => {
+  const draft = (prompt: string) => {
+    const r = draftWorkflow(prompt, SEED_DIRECTORY);
+    if (!r.ok) throw new Error(r.error);
+    return r.draft;
+  };
+  const blocking = (g: Graph) => blockingIssues(g, validateWorkflow(g, { ...SEED_DIRECTORY, now: NOW })).map((i) => i.message);
+  const types = (g: Graph) => flowOrder(g).map((id) => g.nodes.find((n) => n.id === id)!.type);
+
+  it('a critical breakdown: form → switch → email + work order', () => {
+    const d = draft('When a breakdown is reported as critical, email the maintenance leads and raise a work order');
+    expect(types(d.graph)).toEqual(['ioForms', 'switch', 'email', 'workOrder']);
+    const sw = d.graph.nodes.find((n) => n.type === 'switch');
+    expect(sw?.type === 'switch' && sw.config.conditions[0]).toMatchObject({ field: 'form.severity', op: 'is', value: 'Critical' });
+    const mail = d.graph.nodes.find((n) => n.type === 'email');
+    expect(mail?.type === 'email' && mail.config.to).toEqual(['user:u_arjun', 'user:u_sana']);
+    expect(blocking(d.graph)).toEqual([]);
+  });
+
+  it('a schedule that sends a report', () => {
+    const d = draft('Every weekday at 8 am, send the energy report to Vikram and me');
+    expect(types(d.graph)).toEqual(['scheduler', 'report']);
+    const r = d.graph.nodes.find((n) => n.type === 'report');
+    expect(r?.type === 'report' && r.config).toMatchObject({ reportId: 'r_energy', to: ['user:u_vikram', 'user:u_meera'] });
+    expect(blocking(d.graph)).toEqual([]);
+  });
+
+  it('a device past a limit: text and a work order', () => {
+    const d = draft('If the compressor temperature goes above 90, text the maintenance team and raise a work order');
+    expect(types(d.graph)).toEqual(['deviceAlert', 'sms', 'workOrder']);
+    const t = d.graph.nodes[0];
+    expect(t.type === 'deviceAlert' && t.config).toMatchObject({ deviceId: 'd_comp3', parameter: 'temperature', op: 'above', limit: '90' });
+    expect(blocking(d.graph)).toEqual([]);
+  });
+
+  it('a failed inspection emails the quality engineer', () => {
+    const d = draft('When an inspection fails, email the quality engineer');
+    expect(types(d.graph)).toEqual(['ioForms', 'switch', 'email']);
+    expect(blocking(d.graph)).toEqual([]);
+  });
+
+  it('explains what it needs when it can’t tell', () => {
+    const r = draftWorkflow('hello there, how are you', SEED_DIRECTORY);
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('node settings in a run', () => {
+  // A Low breakdown goes to Default, where 'Notify supervisor' fails on a blank supervisor email.
+  const data = { machine_id: 'PRS-12', line: 'Line 3', severity: 'Low', temperature: 64, supervisor_email: '', description: 'Hydraulic leak' };
+  const withSettings = (settings: WfNode['settings']): Graph => {
+    const g = graphOf('wf_breakdown');
+    return { ...g, nodes: g.nodes.map((n) => (n.id === 'bd_e3' ? { ...n, settings } : n)) };
+  };
+  const result = (e: Awaited<ReturnType<typeof simulate>>) => e.nodes.find((n) => n.nodeId === 'bd_e3')!;
+
+  it('stops at the failure by default', async () => {
+    const e = await simulate(withSettings(undefined), data);
+    expect(e.status).toBe('failed');
+    expect(e.failedNodeId).toBe('bd_e3');
+  });
+
+  it('passes straight through a disabled node', async () => {
+    const e = await simulate(withSettings({ disabled: true }), data);
+    expect(e.status).toBe('success');
+    expect(result(e)).toMatchObject({ status: 'skipped', message: 'Disabled: passed its input straight on.' });
+  });
+
+  it('carries on past a failure when told to', async () => {
+    const e = await simulate(withSettings({ onFailure: 'continue' }), data);
+    expect(e.status).toBe('success');
+    expect(result(e).status).toBe('failed');
+    expect(e.summary).toBe('Completed with 1 failed step (Notify supervisor)');
+  });
+
+  it('retries, then fails the same way', async () => {
+    const e = await simulate(withSettings({ onFailure: 'retry', retries: 2 }), data);
+    expect(e.status).toBe('failed');
+    expect(result(e)).toMatchObject({ attempts: 3 });
+    expect(result(e).message).toMatch(/^Tried 3 times\./);
+  });
+
+  it('a disabled node’s missing fields don’t block a test', () => {
+    const g = withSettings({ disabled: true });
+    const broken = { ...g, nodes: g.nodes.map((n) => (n.id === 'bd_e3' && n.type === 'email' ? { ...n, config: { ...n.config, subject: '' } } : n)) };
+    expect(validateWorkflow(broken, { ...SEED_DIRECTORY, now: NOW }).filter((i) => i.nodeId === 'bd_e3')).toEqual([]);
+  });
+});
+
+describe('replay frames', () => {
+  it('cut a finished run to each step, then give the whole run back', async () => {
+    const run = await simulate(graphOf('wf_breakdown'), { machine_id: 'PRS-12', line: 'Line 3', severity: 'Critical', temperature: 64, supervisor_email: 'a@example.com', description: 'x' });
+    const first = replayFrame(run, 0);
+    expect(first.status).toBe('running');
+    expect(first.path).toEqual([run.path[0]]);
+    expect(first.nodes.find((n) => n.nodeId === run.path[0])!.status).toBe('running');
+    const mid = replayFrame(run, 1);
+    expect(mid.nodes.find((n) => n.nodeId === run.path[0])).toEqual(run.nodes.find((n) => n.nodeId === run.path[0]));
+    expect(mid.nodes.find((n) => n.nodeId === run.path[1])!.status).toBe('running');
+    expect(mid.nodes.filter((n) => n.status === 'not_run')).toHaveLength(run.nodes.length - 2);
+    expect(replayFrame(run, run.path.length)).toBe(run);
+  });
+});
+
+describe('sample versions', () => {
+  it('published workflows have a history; the chiller’s v1 had the mistyped number', () => {
+    const chiller = wfs.find((w) => w.id === 'wf_chiller')!;
+    expect(chiller.versions.map((v) => [v.number, v.changes])).toEqual([[1, null], [2, '1 edited']]);
+    expect(chiller.versions[1].graph).toEqual(chiller.published!.graph);
+    expect(wfs.filter((w) => w.status === 'draft').every((w) => w.versions.length === 0)).toBe(true);
+    expect(wfs.filter((w) => w.status !== 'draft').every((w) => w.versions.length >= 1)).toBe(true);
   });
 });

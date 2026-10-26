@@ -3,6 +3,8 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 import { uid } from '@/lib/util';
 import type { Directory, Graph, IoDevice, IoForm, IoReport, IoUser, Workflow } from '../domain/types';
 import { demoFlag } from '../lib/demo';
+import { CURRENT_USER_ID } from '../seed/seed';
+import { changesText, graphChanges } from '../engine/diff';
 
 /**
  * localStorage that reports failed writes instead of swallowing them, so the
@@ -69,7 +71,7 @@ export const useIoWorkflows = create<WorkflowState>()(
           const now = Date.now();
           const wf: Workflow = {
             id: uid('wf'), name: name.trim(), description: description.trim(), status: 'draft',
-            graph: { nodes: [], edges: [] }, published: null, createdAt: now, updatedAt: now,
+            graph: { nodes: [], edges: [] }, published: null, ownerId: CURRENT_USER_ID, versions: [], createdAt: now, updatedAt: now,
           };
           set((s) => ({ workflows: [wf, ...s.workflows] }));
           return wf;
@@ -81,13 +83,24 @@ export const useIoWorkflows = create<WorkflowState>()(
           updatedAt: Date.now(),
         }))),
         saveGraph: (id, graph) => persisted(() => patch(id, (w) => ({ ...w, graph: copyGraph(graph), updatedAt: Date.now() }))),
-        publish: (id, graph) => persisted(() => patch(id, (w) => ({
-          ...w,
-          graph: copyGraph(graph),
-          published: { graph: copyGraph(graph), publishedAt: Date.now() },
-          status: w.status === 'paused' ? 'paused' : 'active',
-          updatedAt: Date.now(),
-        }))),
+        // Each publish is kept as a version: who published it, and what changed from the one before.
+        publish: (id, graph) => persisted(() => patch(id, (w) => {
+          const now = Date.now();
+          const versions = w.versions ?? [];
+          const prev = versions[versions.length - 1];
+          const version = {
+            id: uid('v'), number: (prev?.number ?? 0) + 1, graph: copyGraph(graph), publishedAt: now, publishedBy: CURRENT_USER_ID,
+            changes: prev ? changesText(graphChanges(graph, prev.graph)) ?? 'No step changes' : null,
+          };
+          return {
+            ...w,
+            graph: copyGraph(graph),
+            published: { graph: copyGraph(graph), publishedAt: now },
+            status: w.status === 'paused' ? 'paused' : 'active',
+            versions: [...versions, version],
+            updatedAt: now,
+          };
+        })),
         setStatus: (id, status) => patch(id, (w) => (w.published ? { ...w, status } : w)),
         discardChanges: (id) => {
           const w = get().workflows.find((x) => x.id === id);
@@ -100,7 +113,7 @@ export const useIoWorkflows = create<WorkflowState>()(
           const w = get().workflows.find((x) => x.id === id);
           if (!w) return null;
           const now = Date.now();
-          const copy: Workflow = { ...w, id: uid('wf'), name: `${w.name} (copy)`, status: 'draft', graph: copyGraph(w.graph), published: null, createdAt: now, updatedAt: now };
+          const copy: Workflow = { ...w, id: uid('wf'), name: `${w.name} (copy)`, status: 'draft', graph: copyGraph(w.graph), published: null, ownerId: CURRENT_USER_ID, versions: [], createdAt: now, updatedAt: now };
           set((s) => {
             const i = s.workflows.findIndex((x) => x.id === id);
             const workflows = s.workflows.slice();
@@ -116,8 +129,8 @@ export const useIoWorkflows = create<WorkflowState>()(
     },
     {
       name: 'iosense-workflows',
-      // v4: devices, reports and the newer node types; older prototype data is re-seeded.
-      version: 4,
+      // v5: the fuller sample workspace (15 workflows, a month of history); older data is re-seeded.
+      version: 8,
       migrate: () => ({ workflows: [], forms: [], users: [], devices: [], reports: [], seeded: false }) as unknown as WorkflowState,
       storage: createJSONStorage(() => reportingStorage),
     },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Badge, Button, Drawer, DrawerBody, DrawerFooter, DrawerHeader, TextInput, Tooltip } from '@faclon-labs/fds';
+import { Alert, Badge, Button, Drawer, DrawerBody, DrawerFooter, DrawerHeader, IconButton, TextInput, Tooltip } from '@faclon-labs/fds';
 import { Trash2 } from 'lucide-react';
 import { uid } from '@/lib/util';
 import type {
@@ -7,7 +7,8 @@ import type {
 } from '../domain/types';
 import { NODE_TYPES } from '../domain/nodeTypes';
 import { getNode } from '../engine/graph';
-import { renameNode, updateConfig } from '../engine/graphOps';
+import { renameNode, updateConfig, updateNode } from '../engine/graphOps';
+import { NodeSettingsSection } from './NodeSettingsSection';
 import { NodeTile } from '../ui/NodeTile';
 import { NODE_RUN_STATUS } from '../ui/status';
 import { useWorkflow } from '../pages/WorkflowContext';
@@ -23,11 +24,14 @@ import { WorkOrderForm } from './WorkOrderForm';
 import { ReportForm } from './ReportForm';
 
 /**
- * The selected node's configuration in the stock FDS Drawer (its defaults:
- * popup variant, scrim, focus kept inside). Edits show on the canvas as you
- * type; Submit keeps them, and Cancel (or ✕, Esc, a click outside) puts the
- * node back as it was when the drawer opened. A node that isn't set up yet can
- * still be submitted: the drawer says what's missing and the card shows it.
+ * The selected node's configuration in an FDS popup Drawer with no scrim
+ * (Drawer R8: the canvas behind stays readable and clickable, so
+ * showOverlay={false} with isModal={false}; there is no scroll lock or
+ * backdrop dismissal). Edits show on the canvas as you type; Submit keeps
+ * them, and Cancel, ✕ or Esc puts the node back as it was when the drawer
+ * opened. Clicking another node or the empty canvas keeps what was typed
+ * (it is already on the cards). A node that isn't set up yet can still be
+ * submitted: the drawer says what's missing and the card shows it.
  */
 export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
   const { editor, selection, setSelection, ctx, issues, showAllErrors, focusField, setFocusField, run } = useWorkflow();
@@ -96,16 +100,17 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
   };
 
   return (
-    <Drawer isOpen={!!selected} onDismiss={cancel} initialFocusRef={nameRef}>
+    <Drawer isOpen={!!selected} onDismiss={cancel} showOverlay={false} isModal={false} initialFocusRef={nameRef}>
       <DrawerHeader
         title={node.name || def.defaultName}
         subtitle={def.label}
         leading={<NodeTile type={node.type} size="xs" />}
         titleSuffix={result ? <Badge label={NODE_RUN_STATUS[result.status].label} color={NODE_RUN_STATUS[result.status].color} /> : undefined}
-        // Delete sits beside ✕ (Drawer R18), out of the way of Submit; Undo follows in a toast.
+        // Delete sits beside ✕ (Drawer R18), out of the way of Submit; Undo follows in a toast. The same IconButton
+        // as the header's built-in ✕ (Large, default emphasis), so the two icons match in size and colour.
         trailing={(
           <Tooltip content="Delete node">
-            <Button iconOnly variant="ghost" tone="neutral" aria-label="Delete node" leadingIcon={<Trash2 size={16} />} onClick={() => onDelete(node.id)} />
+            <IconButton icon={Trash2} size="Large" accessibilityLabel="Delete node" onClick={() => onDelete(node.id)} />
           </Tooltip>
         )}
       />
@@ -148,6 +153,10 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
           {node.type === 'sms' && <SmsForm node={node} {...(props as Omit<NodeFormProps<SmsNode>, 'node'>)} />}
           {node.type === 'workOrder' && <WorkOrderForm node={node} {...(props as Omit<NodeFormProps<WorkOrderNode>, 'node'>)} />}
           {node.type === 'report' && <ReportForm node={node} {...(props as Omit<NodeFormProps<ReportNode>, 'node'>)} />}
+          <NodeSettingsSection
+            node={node}
+            onChange={(patch) => editor.update((g) => updateNode(g, node.id, (n) => ({ ...n, settings: { ...n.settings, ...patch } })))}
+          />
         </div>
       </DrawerBody>
       {/* Pinned to the bottom (FDS DrawerFooter): Cancel as a neutral primary beside Submit (Button pairing rule). */}

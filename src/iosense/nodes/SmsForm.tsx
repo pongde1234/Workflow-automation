@@ -3,6 +3,7 @@ import { TextArea, TextInput } from '@faclon-labs/fds';
 import type { SmsNode } from '../domain/types';
 import { SMS_LENGTH } from '../engine/validate';
 import { PeopleField, errorProps, useInsertValue, type NodeFormProps } from './fields';
+import { MessagePreview } from './MessagePreview';
 
 export function SmsForm({ node, ctx, errorFor, touch, onConfig }: NodeFormProps<SmsNode>) {
   const c = node.config;
@@ -53,6 +54,7 @@ export function SmsForm({ node, ctx, errorFor, touch, onConfig }: NodeFormProps<
         />
       </div>
 
+      <MessagePreview texts={{ Message: c.message }} />
       <p className="io-muted BodySmallRegular">Texts are simulated in this prototype. Nothing is sent.</p>
     </>
   );

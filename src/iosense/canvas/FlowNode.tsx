@@ -5,12 +5,13 @@ import {
   CardHeaderLeading, CardHeaderTrailing, DropdownMenu, DropdownMenuOverlay, DropdownMenuSub, DropdownMenuSubContent,
   DropdownMenuSubTrigger, DropdownMenuTrigger, Indicator, Spinner,
 } from '@faclon-labs/fds';
-import { Ellipsis, Link2, Move, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { Check, CircleOff, Ellipsis, Link2, Move, Plus, Power, Trash2, TriangleAlert, X } from 'lucide-react';
 import type { NodeResult, WfNode } from '../domain/types';
+import type { NodeChange } from '../engine/diff';
 import { NODE_TYPES } from '../domain/nodeTypes';
 import { NODE_RUN_STATUS } from '../ui/status';
 import { NodeTile, categoryOf } from '../ui/NodeTile';
-import { nodeSummary, switchRows, type SummaryContext } from './summary';
+import { cardSummary, switchRows, type SummaryContext } from './summary';
 import { AddNodeButton } from './AddNodeButton';
 import { useCanvasActions } from './canvasActions';
 
@@ -30,6 +31,8 @@ export interface FlowNodeData extends Record<string, unknown> {
   /** While a connection is dragged over this node: whether it may be dropped here, and on which side. */
   connectHint?: { state: 'valid' | 'invalid'; side: 'in' | 'out'; handle?: string };
   isMenuOpen: boolean;
+  /** New or edited since the workflow was last published (shown while Publish changes is pending). */
+  change?: NodeChange;
 }
 
 export type FlowNodeType = Node<FlowNodeData, 'wf'>;
@@ -45,12 +48,26 @@ function centreWithin(el: HTMLElement, root: HTMLElement) {
   return y;
 }
 
-/** Right side of the card's footer: the run state while/after a test, else what needs attention. */
-/** The node's status, Small so its 12px label matches the category Badge beside it (the Spinner's label is 12px too). */
-function StatusMark({ run, issue }: { run?: NodeResult; issue?: FlowNodeData['issue'] }) {
+/** What a node does, in one plain line (no avatars or inserted-value tags: those read as clutter on a card). */
+export function NodeSummary({ node, ctx }: { node: WfNode; ctx: SummaryContext }) {
+  return <p className="io-node__summary BodySmallRegular">{cardSummary(node, ctx)}</p>;
+}
+
+/** Added or changed since the last publish: what Publish changes will put live. */
+export function ChangeBadge({ change }: { change: NodeChange }) {
+  return <Badge label={change === 'new' ? 'New' : 'Edited'} color="Information" />;
+}
+
+/**
+ * The node's status, Small so its 12px label matches the category Badge beside it (the Spinner's label is 12px too).
+ * How a run ended is a Badge with ✓ or ✕, beside the card's green or red outline; queued and skipped stay a quiet dot.
+ */
+export function StatusMark({ run, issue }: { run?: NodeResult; issue?: FlowNodeData['issue'] }) {
   if (run?.status === 'running') return <Spinner size="Medium" label="Running" labelPosition="Right" />;
   if (run) {
     const s = NODE_RUN_STATUS[run.status];
+    if (run.status === 'success') return <Badge label={s.label} color={s.color} leadingIcon={<Check size={12} />} />;
+    if (run.status === 'failed') return <Badge label={s.label} color={s.color} leadingIcon={<X size={12} />} />;
     return <Indicator size="Small" color={s.color} aria-live="off">{s.label}</Indicator>;
   }
   // Not set up yet: a warning, so a Notice Badge with the warning icon (Badge R: a state that needs attention), not a bare dot.
@@ -74,6 +91,7 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
   const def = NODE_TYPES[node.type];
   const cat = categoryOf(node.type);
   const isTrigger = def.category === 'trigger';
+  const disabled = !isTrigger && !!node.settings?.disabled;
   const rows = node.type === 'switch' ? switchRows(node, ctx.vars) : null;
   const outputs = rows ? rows.map((r) => r.handle) : ['out'];
   const statusText = data.run ? NODE_RUN_STATUS[data.run.status].label : data.issue === 'error' ? 'needs setup' : data.issue === 'unreachable' ? 'not connected' : '';
@@ -98,13 +116,30 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
     return () => ro.disconnect();
   });
 
+  // An input dot sits halfway down the card. When the card's height changes on its own (fonts arriving, a summary
+  // wrapping, a failed run adding its reason), React Flow keeps the old dot position and lines end a few px off the
+  // dot, so every height change has it measure the dots again.
+  const lastHeight = useRef(0);
+  useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return undefined;
+    const ro = new ResizeObserver(() => {
+      const h = el.offsetHeight;
+      if (h === lastHeight.current) return;
+      lastHeight.current = h;
+      requestAnimationFrame(() => updateNodeInternals(id));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [id, updateNodeInternals]);
+
   const portStyle = (handle: string) => (rowY[handle] !== undefined ? { top: rowY[handle] } : undefined);
 
   const menu = (
     <span className="nodrag nopan">
       <DropdownMenu isOpen={data.isMenuOpen} onOpenChange={({ isOpen }) => actions.onMenuOpenChange(node.id, isOpen)}>
         <DropdownMenuTrigger>
-          <CardHeaderIconButton icon={<Ellipsis size={16} />} aria-label={`Actions for ${node.name}`} tabIndex={-1} />
+          <CardHeaderIconButton size="xs" icon={<Ellipsis size={16} />} aria-label={`Actions for ${node.name}`} tabIndex={-1} />
         </DropdownMenuTrigger>
         <DropdownMenuOverlay>
           <ActionList>
@@ -125,6 +160,14 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
             )}
             <ActionListItem title="Connect to…" value="connect" leading={<ActionListItemIcon icon={Link2} />} onClick={() => actions.onMenuAction(node.id, { kind: 'connect' })} />
             <ActionListItem title="Move" value="move" leading={<ActionListItemIcon icon={Move} />} onClick={() => actions.onMenuAction(node.id, { kind: 'move' })} />
+            {!isTrigger && (
+              <ActionListItem
+                title={disabled ? 'Enable' : 'Disable'}
+                value="toggleDisabled"
+                leading={<ActionListItemIcon icon={disabled ? Power : CircleOff} />}
+                onClick={() => actions.onMenuAction(node.id, { kind: 'toggleDisabled' })}
+              />
+            )}
             <ActionListItem title="Delete node" value="delete" intent="negative" leading={<ActionListItemIcon icon={Trash2} />} onClick={() => actions.onMenuAction(node.id, { kind: 'delete' })} />
           </ActionList>
         </DropdownMenuOverlay>
@@ -133,7 +176,7 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
   );
 
   return (
-    <div ref={wrapRef} className="io-node" data-node-id={node.id}>
+    <div ref={wrapRef} className="io-node" data-node-id={node.id} data-tone={cat.tone} data-run={data.run?.status} data-disabled={disabled || undefined}>
       {!isTrigger && (
         <Handle type="target" position={Position.Left} id="in" className="io-port io-port--in" data-hint={data.connectHint?.side === 'in' ? data.connectHint.state : undefined} aria-hidden="true" />
       )}
@@ -154,13 +197,15 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
         size="Medium"
         padding={16}
         width={NODE_CARD_WIDTH}
+        // Disabled: dimmed with the Card's own opacity, and said in words beside the role.
+        opacity={disabled ? 0.55 : undefined}
         isSelected={data.isSelected}
         onClick={() => actions.onSelectNode(node.id)}
         onKeyDown={(e) => actions.onNodeKeyDown(e, node.id)}
-        accessibilityLabel={`${def.label}: ${node.name || def.defaultName}${statusText ? `, ${statusText}` : ''}`}
+        accessibilityLabel={`${def.label}: ${node.name || def.defaultName}${disabled ? ', disabled' : ''}${statusText ? `, ${statusText}` : ''}`}
       >
         <CardHeader showDivider={false}>
-          <CardHeaderLeading title={node.name || def.defaultName} subtitle={def.label} prefix={<NodeTile type={node.type} />} />
+          <CardHeaderLeading title={node.name || def.defaultName} subtitle={def.label} prefix={<NodeTile type={node.type} size="xs" />} />
           <CardHeaderTrailing visual={menu} />
         </CardHeader>
         <CardBody>
@@ -169,13 +214,17 @@ export const FlowNode = memo(function FlowNode({ id, data }: NodeProps<FlowNodeT
               ? rows.map((r) => (
                 <p key={r.handle} className="io-node__row BodySmallRegular" data-port-anchor={r.handle}>{r.label}</p>
               ))
-              : <p className="io-node__summary BodySmallRegular">{nodeSummary(node, ctx)}</p>}
+              : <NodeSummary node={node} ctx={ctx} />}
             <Divider />
             <div className="io-node__meta">
-              <Badge label={cat.label} color="Neutral" />
-              <StatusMark run={data.run} issue={data.issue} />
+              <span className="io-node__tags">
+                <Badge label={cat.label} color="Neutral" />
+                {disabled && <Badge label="Disabled" color="Neutral" leadingIcon={<CircleOff size={12} />} />}
+                {data.change && <ChangeBadge change={data.change} />}
+              </span>
+              {/* A disabled node's "Skipped" would repeat its Disabled badge. */}
+              <StatusMark run={disabled && data.run?.status === 'skipped' ? undefined : data.run} issue={disabled ? undefined : data.issue} />
             </div>
-            {data.run?.status === 'failed' && data.run.message && <p className="io-node__reason BodySmallRegular">{data.run.message}</p>}
           </div>
         </CardBody>
       </Card>

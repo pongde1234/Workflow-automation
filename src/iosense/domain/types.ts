@@ -138,7 +138,17 @@ export interface ReportConfig {
   to: string[];
 }
 
-interface NodeBase<T extends NodeType, C> { id: string; type: T; name: string; position: XY; config: C }
+/** How a node behaves in a run, apart from what it does (its config). */
+export interface NodeSettings {
+  /** Runs pass straight through it (a Switch takes Default). Triggers can't be disabled. */
+  disabled?: boolean;
+  /** When it fails: stop the run (the default), carry on with the next step, or try again first. Only email, SMS and report can fail. */
+  onFailure?: 'stop' | 'continue' | 'retry';
+  /** Extra attempts when retrying. */
+  retries?: 1 | 2 | 3;
+}
+
+interface NodeBase<T extends NodeType, C> { id: string; type: T; name: string; position: XY; config: C; settings?: NodeSettings }
 
 export type IoFormsNode = NodeBase<'ioForms', IoFormsConfig>;
 export type SchedulerNode = NodeBase<'scheduler', SchedulerConfig>;
@@ -169,6 +179,18 @@ export interface Graph { nodes: WfNode[]; edges: WfEdge[] }
 
 export type WorkflowStatus = 'draft' | 'active' | 'paused';
 
+/** One publish of a workflow, kept so it can be compared with the draft and restored. */
+export interface WorkflowVersion {
+  id: string;
+  number: number;
+  graph: Graph;
+  publishedAt: number;
+  /** The iosense user who published it. */
+  publishedBy: string;
+  /** What changed from the version before, e.g. "1 edited · 1 new"; null for the first. */
+  changes: string | null;
+}
+
 export interface Workflow {
   id: string;
   name: string;
@@ -178,6 +200,10 @@ export interface Workflow {
   graph: Graph;
   /** What is Active/Paused. Null while Draft. */
   published: { graph: Graph; publishedAt: number } | null;
+  /** The iosense user who looks after it (whoever created it, for a new one). */
+  ownerId: string;
+  /** Every publish, oldest first; the last is what's live. */
+  versions: WorkflowVersion[];
   createdAt: number;
   updatedAt: number;
 }
@@ -195,6 +221,8 @@ export interface NodeResult {
   status: NodeRunStatus;
   durationMs?: number;
   message?: string;
+  /** How many times it ran, when its settings say to retry. */
+  attempts?: number;
   /** Switch: the handle that ran and its readable label. */
   takenHandle?: string;
   takenLabel?: string;

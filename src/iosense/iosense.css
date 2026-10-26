@@ -11,9 +11,15 @@
 .io-form p, .io-node p, .io-condition h3, .io-form h3 { margin: 0; }
 /* The modal body pads its content; the paragraph adds no margin of its own. */
 .io-confirm { margin: 0; }
+/* A node form's preview: a heading and where the values come from, then the filled texts. */
+.io-preview { display: flex; flex-direction: column; gap: var(--spacing-8); }
+.io-preview__head { display: flex; flex-direction: column; gap: var(--spacing-2); }
+.io-preview h3, .io-preview p { margin: 0; }
 .io-muted { color: var(--text-neutral-muted); }
 
-/* Node-type tile: the category's faded background with its icon colour (Trigger notice, Logic brand, Action positive). */
+/* An icon on a tile: one FDS colour family's faded background and its text colour. Node tiles take their role's
+   (Trigger notice, Logic brand, Action positive); Overview's KPI tiles take their metric's. In a card header it's the
+   20px size, which fills FDS's icon slot exactly, so it sits level with the name. */
 .io-tile {
   display: inline-grid;
   place-items: center;
@@ -21,10 +27,12 @@
   width: var(--spacing-32);
   height: var(--spacing-32);
   border-radius: var(--radius-m);
-  /* One brand tint for every node: no colour per kind, since green, red and orange mean run status. */
-  background: var(--background-brand-faded);
-  color: var(--text-brand-normal);
 }
+.io-tile[data-tone="notice"] { background: var(--background-notice-faded); color: var(--text-notice-normal); }
+.io-tile[data-tone="brand"] { background: var(--background-brand-faded); color: var(--text-brand-normal); }
+.io-tile[data-tone="positive"] { background: var(--background-positive-faded); color: var(--text-positive-normal); }
+.io-tile[data-tone="negative"] { background: var(--background-negative-faded); color: var(--text-negative-normal); }
+.io-tile[data-tone="info"] { background: var(--background-info-faded); color: var(--text-info-normal); }
 .io-tile[data-size="xs"] { width: var(--spacing-20); height: var(--spacing-20); border-radius: var(--radius-s); }
 .io-tile[data-size="sm"] { width: var(--spacing-24); height: var(--spacing-24); border-radius: var(--radius-s); }
 .io-tile[data-size="lg"] { width: var(--spacing-48); height: var(--spacing-48); border-radius: var(--radius-l); }
@@ -35,8 +43,11 @@
 .io-list { display: flex; flex-direction: column; gap: var(--spacing-16); }
 .io-list__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-12); }
 .io-list__search { flex: 0 1 calc(var(--spacing-64) * 5); min-width: calc(var(--spacing-64) * 3); }
-.io-list__filters { display: flex; flex-wrap: wrap; gap: var(--spacing-8); }
+/* The filters in force, in a table header's action slot: removable Tags, then Clear filters. */
+.io-filters { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--spacing-8); }
 .io-list__end { display: flex; align-items: center; gap: var(--spacing-12); margin-inline-start: auto; }
+/* The status strip, then its panel (the list) below it. */
+.io-list__tabs { gap: var(--spacing-16); }
 /* Filled tabs always fill their strip; this strip is two icons wide. */
 .io-list__layout { width: calc(var(--spacing-36) * 2 + var(--spacing-8)); }
 .io-wf-cards {
@@ -63,9 +74,17 @@
 .io-wf-card__run { display: inline-flex; align-items: center; gap: var(--spacing-8); }
 .io-center { display: grid; place-items: center; height: 100%; padding: var(--spacing-24); }
 
-.io-details { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing-64) * 2), 1fr)); gap: var(--spacing-12); margin: 0; }
-.io-details dt { color: var(--text-neutral-muted); }
-.io-details dd { margin: 0; }
+/* ── Overview: a row of KPI tiles, then the trend and the trigger mix side by side (they stack when there's no room for both) ── */
+.io-overview__kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--spacing-64) * 4)), 1fr));
+  gap: var(--spacing-16);
+}
+.io-kpi { display: flex; flex-direction: column; gap: var(--spacing-8); }
+.io-overview__charts { display: flex; flex-wrap: wrap; gap: var(--spacing-16); }
+.io-overview__trend { flex: 2 1 calc(var(--spacing-64) * 8); min-width: 0; }
+.io-overview__mix { flex: 1 1 calc(var(--spacing-64) * 5); min-width: 0; }
+
 
 /* ── Workflow page: header bar, then the body (FDS S2 canvas page) ── */
 
@@ -88,9 +107,18 @@
 .io-controls__save { display: inline-flex; align-items: center; gap: var(--spacing-4); white-space: nowrap; color: var(--text-neutral-muted); margin-inline-start: var(--spacing-8); }
 /* The save status spaces itself, so its live region adds no gap while empty. */
 .io-controls__group--status { gap: 0; }
+/* Filled tabs fill their strip: wide enough for two labels, or two icons on phones. */
 .io-controls__save[data-state="saved"] svg { color: var(--text-positive-normal); }
 
 .io-history { display: flex; flex-direction: column; gap: var(--spacing-16); }
+/* "All runs" sits at its own width above a run, not stretched across the drawer. */
+.io-history__back { align-self: flex-start; }
+/* A version compared with the draft: one row per step that differs, with what happened to it. */
+.io-versions { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-versions h3, .io-versions p { margin: 0; }
+.io-versions__diff { display: flex; flex-direction: column; gap: var(--spacing-8); margin: 0; padding: 0; list-style: none; }
+.io-versions__row { display: flex; align-items: center; gap: var(--spacing-8); color: var(--text-neutral-subtle); }
+.io-versions__name { flex: 1 1 auto; min-width: 0; color: var(--text-neutral-normal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Canvas ── */
 
@@ -117,8 +145,12 @@
   vector-effect: non-scaling-stroke;
 }
 .io-edge[data-selected] { stroke: var(--border-brand-default); stroke-width: var(--border-width-thicker); }
-.io-edge[data-run="taken"] { stroke: var(--border-brand-default); stroke-width: var(--border-width-thicker); }
-.io-edge[data-run="untaken"] { stroke: var(--border-neutral-default); stroke-dasharray: var(--spacing-4) var(--spacing-4); }
+/* After a run: the links it took are green with an arrowhead; the ones it didn't are dashed, in the same grey as a
+   resting link (the lighter border grey was too faint to see on the dotted canvas). */
+.io-edge[data-run="taken"] { stroke: var(--border-positive-default); stroke-width: var(--border-width-thicker); }
+.io-edge[data-run="untaken"] { stroke: var(--border-neutral-highlighted); stroke-dasharray: var(--spacing-4) var(--spacing-4); }
+.io-edge__arrow { fill: var(--border-positive-default); }
+.io-edge-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
 .io-edge--preview { stroke: var(--border-brand-default); stroke-dasharray: var(--spacing-4) var(--spacing-4); }
 /* While a test runs, dashes flow along the link into the node being worked on (reduced motion: FDS's central rule stops it). */
 .io-edge[data-run="flowing"] {
@@ -139,11 +171,13 @@
 
 .io-node { position: relative; }
 .io-node__body { display: flex; flex-direction: column; gap: var(--spacing-8); }
+/* Up to two lines, then "…". */
 .io-node__summary {
   color: var(--text-neutral-subtle);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .io-node__row {
   padding-block: var(--spacing-4);
@@ -152,13 +186,48 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.io-node__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-8); min-height: var(--spacing-24); }
-.io-node__reason { color: var(--text-negative-normal); }
+/* As tall as its badges (20px), so the bottom padding matches the other three sides. */
+.io-node__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-8); min-height: var(--spacing-20); }
+.io-node__tags { display: inline-flex; align-items: center; gap: var(--spacing-4); }
+/* Names stay on one line and end in "…" when too long (an FDS card title would wrap and grow the header). The full
+   name is in the card's accessible name and in its drawer. */
+.io-node .ds-card__header-title-row,
+.io-wf-cards .ds-card__header-title-row { flex-wrap: nowrap; min-width: 0; }
+.io-node .ds-card__header-title,
+.io-wf-cards .ds-card__header-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The ⋯ button (FDS's smallest, 28px) sits at the top with the icon and the name, so its box keeps the card's 16px
+   padding at the top and the right; FDS would centre it on the name and type together. */
+.io-node .ds-card__header-trailing,
+.io-wf-cards .ds-card__header-trailing { align-self: flex-start; }
+/* The node drawer's Settings: after the step's own fields, below a divider. */
+.io-settings { display: flex; flex-direction: column; gap: var(--spacing-16); }
+.io-settings h3 { margin: 0; }
+
+/*
+ * After a run, each node that ran is outlined: green when it succeeded, red when it failed. Drawn exactly as FDS draws
+ * a selected Card (its border hidden, a 2px ring in its place), in the positive or negative border colour. A
+ * deliberate exception the user asked for: FDS has no success or error state on a Card (Card guard) and G21 bans added
+ * rings. Selection keeps its own brand ring, and keyboard focus still shows FDS's focus ring.
+ */
+.io-node[data-run="success"] .ds-card:not(.ds-card--selected) {
+  border-color: transparent;
+  box-shadow: 0 0 0 var(--border-width-thicker) var(--border-positive-default);
+}
+.io-node[data-run="failed"] .ds-card:not(.ds-card--selected) {
+  border-color: transparent;
+  box-shadow: 0 0 0 var(--border-width-thicker) var(--border-negative-default);
+}
+.io-node[data-run="success"] .ds-card:not(.ds-card--selected):has(.ds-card__overlay:focus-visible) {
+  box-shadow: 0 0 0 var(--border-width-thicker) var(--border-positive-default), var(--focus-ring-shadow);
+}
+.io-node[data-run="failed"] .ds-card:not(.ds-card--selected):has(.ds-card__overlay:focus-visible) {
+  box-shadow: 0 0 0 var(--border-width-thicker) var(--border-negative-default), var(--focus-ring-shadow);
+}
 
 /*
  * Ports: the canvas's own composite (FDS has no graph handle). Solid dots
  * centred on the card's edge and painted behind it (DOM order), so only the
- * outer half shows. Both take the line's neutral colour; only connecting lights them up.
+ * outer half shows. An input takes the line's colour; an output its node's role colour.
  */
 .io-node .io-port {
   position: absolute;
@@ -176,6 +245,9 @@
 .io-node .io-port { cursor: crosshair; }
 /* A larger grab area than the dot (it sits half behind the card): connections can start from either end. */
 .io-port::after { content: ""; position: absolute; inset: calc(var(--spacing-8) * -1); border-radius: var(--radius-max); }
+.io-node[data-tone="notice"] .io-port--out { background: var(--background-notice-default); }
+.io-node[data-tone="brand"] .io-port--out { background: var(--background-brand-default); }
+.io-node[data-tone="positive"] .io-port--out { background: var(--background-positive-default); }
 /* While connecting from an output, every input lights up faintly; the port under the pointer turns solid (or red if refused). */
 .io-canvas[data-connecting="from-output"] .io-node .io-port--in { background: var(--background-brand-faded-highlighted); }
 .io-canvas[data-connecting] .io-node .io-port[data-hint="valid"] { background: var(--background-brand-default); }
@@ -207,24 +279,51 @@
 .io-canvas__move { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: var(--spacing-8); padding-top: var(--spacing-8); pointer-events: all; }
 .io-canvas__start { position: absolute; inset: 0; display: grid; place-items: center; padding: var(--spacing-16); pointer-events: none; }
 .io-canvas__start > * { pointer-events: auto; }
-.io-start {
-  display: flex;
+/* An empty workflow's "+" tile and its label: a dashed placeholder in FDS's own dashed border, brand on hover. */
+/* The empty canvas: the "+" tile, then "or" and the other ways in, all centred. */
+.io-first { display: flex; flex-direction: column; align-items: center; gap: var(--spacing-16); }
+.io-first__alts { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--spacing-12); }
+/* Template gallery: equal cards, each with its steps as a row of tiles above what it does. */
+.io-templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--spacing-64) * 4)), 1fr));
+  grid-auto-rows: 1fr;
+  gap: var(--spacing-16);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.io-template { display: flex; flex-direction: column; gap: var(--spacing-12); }
+.io-template p { margin: 0; }
+.io-template__steps { display: flex; flex-wrap: wrap; gap: var(--spacing-4); }
+.io-form__alt { display: inline-flex; margin-block-start: var(--spacing-16); }
+.io-first-step {
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-8);
-  /* Room for the three triggers side by side. */
-  width: min(100%, calc(var(--spacing-64) * 10 + var(--spacing-32)));
-  text-align: center;
+  padding: var(--spacing-8);
+  border: none;
+  border-radius: var(--radius-l);
+  background: none;
+  color: var(--text-neutral-normal);
+  font: inherit;
+  cursor: pointer;
 }
-.io-start h2, .io-start p { margin: 0; }
-.io-start__choices {
+.io-first-step__tile {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing-64) * 3), 1fr));
-  gap: var(--spacing-16);
-  width: 100%;
-  padding-top: var(--spacing-16);
+  place-items: center;
+  width: calc(var(--spacing-48) * 2);
+  height: calc(var(--spacing-48) * 2);
+  margin-block-end: var(--spacing-4);
+  border: var(--border-width-thick) dashed var(--border-neutral-highlighted);
+  border-radius: var(--radius-l);
+  background: var(--background-surface-default);
+  color: var(--text-neutral-subtle);
+  transition: border-color var(--global-duration-xquick) var(--global-easing-standard), color var(--global-duration-xquick) var(--global-easing-standard);
 }
-.io-start__choice { display: flex; flex-direction: column; align-items: flex-start; gap: var(--spacing-8); text-align: left; }
+.io-first-step:hover .io-first-step__tile { border-color: var(--border-brand-default); color: var(--text-brand-normal); }
+.io-first-step:focus-visible { outline: none; box-shadow: var(--focus-ring-shadow); }
 .io-canvas__zoom {
   position: absolute;
   left: var(--spacing-16);
@@ -234,13 +333,23 @@
   gap: var(--spacing-8);
 }
 /* Read-only: the level is shown, not clicked. Tabular figures so it doesn't jitter as it changes. */
+/* The minimap: a surface card in the bottom-right corner, nodes in their role colours, the area outside the view dimmed. */
+.io-canvas .react-flow__minimap {
+  margin: var(--spacing-16);
+  border: var(--border-width-thin) solid var(--border-neutral-default);
+  border-radius: var(--radius-m);
+  background: var(--background-surface-default);
+  box-shadow: var(--shadow-s);
+  overflow: hidden;
+}
+.io-canvas .react-flow__minimap-mask { fill: var(--background-neutral-faded); stroke: var(--border-brand-default); stroke-width: var(--border-width-thick); }
+.io-canvas .react-flow__minimap-node.io-mm--notice { fill: var(--background-notice-default); }
+.io-canvas .react-flow__minimap-node.io-mm--brand { fill: var(--background-brand-default); }
+.io-canvas .react-flow__minimap-node.io-mm--positive { fill: var(--background-positive-default); }
 .io-canvas__zoom-level { color: var(--text-neutral-subtle); font-variant-numeric: tabular-nums; }
 
 /* "Add a node" window: search, then two columns of node types under section headings. */
 .io-picker { display: flex; flex-direction: column; gap: var(--spacing-16); }
-.io-picker__columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--spacing-16); align-items: start; }
-.io-picker__columns[data-narrow] { grid-template-columns: minmax(0, 1fr); }
-.io-picker__column { display: flex; flex-direction: column; min-width: 0; }
 .io-picker__empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--spacing-8); padding-block: var(--spacing-16); }
 .io-picker__empty p { margin: 0; }
 
@@ -290,8 +399,13 @@
 .io-logs p { margin: 0; }
 .io-logs__head { display: flex; align-items: center; gap: var(--spacing-16); padding: var(--spacing-8) var(--spacing-16); min-width: 0; }
 .io-logs__state { display: flex; align-items: center; gap: var(--spacing-12); flex: 1 1 auto; min-width: 0; }
-.io-logs__state > :first-child { flex: 0 0 auto; min-width: calc(var(--spacing-64) * 2); }
-.io-logs__state > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-logs__state > :first-child { flex: 0 0 auto; }
+/* The progress bar keeps a steady width while the run goes. */
+.io-logs__progress { width: calc(var(--spacing-64) * 2); }
+.io-logs__where, .io-logs__summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.io-logs__state > .io-logs__status { display: inline-flex; align-items: center; gap: var(--spacing-4); flex: 0 1 auto; min-width: 0; }
+/* "at <node>" continues the Indicator's label, in its colour. */
+.io-logs__where { color: var(--text-neutral-subtle); }
 .io-logs__actions { display: flex; align-items: center; gap: var(--spacing-8); flex: 0 0 auto; }
 .io-logs__body {
   display: grid;
@@ -309,16 +423,22 @@
 .io-logs__list { display: grid; grid-template-rows: minmax(0, 1fr); border-right: var(--border-width-thin) solid var(--border-neutral-default); }
 .io-logs__nodes { height: 100%; }
 .io-logs[data-narrow] .io-logs__list { border-right: none; border-bottom: var(--border-width-thin) solid var(--border-neutral-default); }
-.io-logs[data-narrow] .io-logs__state > span { display: none; }
+.io-logs[data-narrow] .io-logs__summary { display: none; }
+/* Phones: the actions take their own line when they don't fit beside the title and status. */
+.io-logs[data-narrow] .io-logs__head { flex-wrap: wrap; row-gap: var(--spacing-8); }
+.io-logs[data-narrow] .io-logs__actions { margin-inline-start: auto; }
 .io-logs__detail-inner { display: flex; flex-direction: column; gap: var(--spacing-16); padding: var(--spacing-16); }
 .io-logs__detail-head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-12); }
 .io-logs__detail-title { display: flex; flex-direction: column; gap: var(--spacing-4); min-width: 0; }
 .io-logs__detail-title h3 { overflow: hidden; text-overflow: ellipsis; }
-.io-logs__switch { width: calc(var(--spacing-64) * 3); }
+/* As wide as its two labels: a filled strip fills its wrapper, so a wider wrapper would only pad the labels out. */
+.io-logs__switch { width: max-content; }
 
 /* ── Node drawer ── */
 
 .io-condition { display: flex; flex-direction: column; gap: var(--spacing-16); }
 .io-condition__head { display: flex; align-items: center; justify-content: space-between; gap: var(--spacing-8); }
+/* The value to check and its comparison share a row; alone, the first one takes the whole width. */
+.io-condition__pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--spacing-64) * 2)), 1fr)); gap: var(--spacing-12); align-items: start; }
 .io-schedule-summary { display: flex; flex-direction: column; gap: var(--spacing-4); }
 

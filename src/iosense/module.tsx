@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { NAV_ICON_SIZE } from '@faclon-labs/fds';
-import { Waypoints } from 'lucide-react';
+import { History, Waypoints, Workflow } from 'lucide-react';
 import type { AppModule } from '@/lib/appModule';
 import { useIoWorkflows } from './store/workflowStore';
 
@@ -12,13 +12,26 @@ const workflowId = (pathname: string) => {
   return root === 'iosense' && section === 'workflows' ? id : undefined;
 };
 
+/** The nav id for a path: /iosense/runs, or anything under /iosense/workflows. */
+const PAGE_FOR_SECTION: Record<string, string> = { runs: 'io-runs', workflows: 'io-workflows' };
+
 export const iosenseModule: AppModule = {
   id: 'iosense',
   segment: 'iosense',
-  // The app is workflow automation alone, so the rail has one item. A workflow's trail
-  // ("Workflow automation / Critical breakdown alerts", the first crumb a link back) is built in App.tsx.
-  nav: [{ id: 'io-workflows', label: 'Workflow automation', icon: <Waypoints size={NAV_ICON_SIZE} /> }],
-  pages: { 'io-workflows': { title: 'Workflow automation', path: '/iosense/workflows' } },
+  // One group, Workflow automation, with its two pages. A group (not flat items) also puts the list page
+  // in a workflow's trail as a link back ("Workflow automation / Workflows / Critical breakdown alerts").
+  nav: [{
+    id: 'automation', label: 'Workflow automation', icon: <Waypoints size={NAV_ICON_SIZE} />, children: [
+      { id: 'io-workflows', label: 'Workflows', icon: <Workflow size={NAV_ICON_SIZE} /> },
+      { id: 'io-runs', label: 'Run history', icon: <History size={NAV_ICON_SIZE} /> },
+    ],
+  }],
+  pages: {
+    'io-workflows': { title: 'Workflows', path: '/iosense/workflows' },
+    'io-runs': { title: 'Run history', path: '/iosense/runs' },
+  },
+  landing: { automation: 'io-workflows' },
+  activeId: (pathname) => PAGE_FOR_SECTION[pathname.split('/')[2] ?? ''] ?? 'io-workflows',
   useRecord: (pathname) => {
     const id = workflowId(pathname);
     const name = useIoWorkflows((s) => (id ? s.workflows.find((w) => w.id === id)?.name : undefined));

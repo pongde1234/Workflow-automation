@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toastStore } from '@faclon-labs/fds';
 import { uid } from '@/lib/util';
@@ -6,6 +6,7 @@ import { createNode } from '../domain/nodeTypes';
 import { flowOrder, getNode } from '../engine/graph';
 import { removeNode } from '../engine/graphOps';
 import { Canvas } from '../canvas/Canvas';
+import { graphChanges } from '../engine/diff';
 import { ConnectModal } from '../canvas/ConnectModal';
 import { NodeDrawer } from '../nodes/NodeDrawer';
 import { useWorkflow } from './WorkflowContext';
@@ -34,13 +35,15 @@ interface EditorViewProps {
 }
 
 export function EditorView({ rightInset, onRetest, onTest, isTesting, historyOpen }: EditorViewProps) {
-  const { workflow, editor, ctx, issues, selection, setSelection, run, setRun, goToNode, announce, setLogNodeId } = useWorkflow();
+  const { workflow, editor, ctx, issues, selection, setSelection, run, setRun, announce, setLogNodeId, startReplay } = useWorkflow();
   const [connectFor, setConnectFor] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const actions = useWorkflowActions(onTest);
 
-  // "Open in editor" from an execution: draw that run and open the node that failed.
+  // A past run opened from History, Run history, Overview or a notification: draw it on the canvas and show its logs,
+  // with the node that failed picked in them. The node's settings stay closed; its red outline and the logs say what
+  // went wrong, and a click on the card opens the form when it's wanted.
   const executionId = params.get('execution');
   useEffect(() => {
     if (!executionId) return;
@@ -48,10 +51,9 @@ export function EditorView({ rightInset, onRetest, onTest, isTesting, historyOpe
     setParams({}, { replace: true });
     if (!e) return;
     setRun(e, true);
+    if (params.get('replay')) startReplay(e.id);
     const focus = e.failedNodeId ?? params.get('node');
-    if (focus && getNode(editor.latest.current, focus)) {
-      goToNode(focus, e.nodes.find((n) => n.nodeId === focus)?.field);
-    }
+    if (focus && e.nodes.some((n) => n.nodeId === focus)) setLogNodeId(focus);
   }, [executionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Undo / redo / save shortcuts, outside text fields.
@@ -87,6 +89,19 @@ export function EditorView({ rightInset, onRetest, onTest, isTesting, historyOpe
     if (prev) window.setTimeout(() => focusNodeCard(prev), 0);
   };
 
+  // Nodes new or edited since the last publish, badged while Publish changes is pending.
+  const changes = useMemo(
+    () => (workflow.published && workflow.status !== 'draft' ? graphChanges(editor.graph, workflow.published.graph).byNode : undefined),
+    [workflow.published, workflow.status, editor.graph],
+  );
+  const onSelect = (s: Parameters<typeof setSelection>[0]) => {
+    setSelection(s);
+    // Picking a node also shows it in the run logs.
+    if (s?.kind === 'node' && run?.nodes.some((n) => n.nodeId === s.id)) setLogNodeId(s.id);
+  };
+  const onCreateNode = (type: Parameters<typeof createNode>[0], at: Parameters<typeof createNode>[1]) =>
+    createNode(type, at, editor.latest.current.nodes.map((n) => n.name), uid);
+
   return (
     <>
       <WorkflowControls actions={actions} isTesting={isTesting} />
@@ -99,16 +114,13 @@ export function EditorView({ rightInset, onRetest, onTest, isTesting, historyOpe
           run={run}
           selection={selection}
           rightInset={rightInset}
-          onSelect={(s) => {
-            setSelection(s);
-            // Picking a node on the canvas also shows it in the run logs.
-            if (s?.kind === 'node' && run?.nodes.some((n) => n.nodeId === s.id)) setLogNodeId(s.id);
-          }}
+          onSelect={onSelect}
           onEdit={editor.update}
-          onCreateNode={(type, at) => createNode(type, at, editor.latest.current.nodes.map((n) => n.name), uid)}
+          onCreateNode={onCreateNode}
           onDeleteNode={deleteNode}
           onConnectRequest={setConnectFor}
           onAnnounce={announce}
+          changes={changes}
         />
       </div>
       <RunLogs onRetest={onRetest} />
@@ -121,6 +133,7 @@ export function EditorView({ rightInset, onRetest, onTest, isTesting, historyOpe
         onDismiss={() => setConnectFor(null)}
       />
       <HistoryDrawer
+        workflowId={workflow.id}
         isOpen={historyOpen}
         onDismiss={() => navigate(editorPath(workflow.id))}
         onPick={(e) => navigate(runPath(workflow.id, e.id))}

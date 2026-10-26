@@ -24,7 +24,8 @@ function parseYmd(ymd: string): Date | null {
 export function SchedulerForm({ node, errorFor, touch, onConfig }: NodeFormProps<SchedulerNode>) {
   const c = node.config;
   const next = nextRun(c, Date.now());
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const tz = new Intl.DateTimeFormat(undefined, { timeZoneName: 'long' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value
+    ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const time = <TimeField value={c.time} onChange={(time) => { touch('time'); onConfig({ time }); }} error={errorFor('time')} />;

@@ -1,18 +1,18 @@
 import { useRef, useState, useSyncExternalStore, type KeyboardEvent, type PointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ActionList, ActionListItem, Alert, Button, Indicator, LinkButton, ProgressBar, ScrollArea, Spinner, TabItem, TabList, Tabs,
+  ActionList, ActionListItem, ActionListItemIcon, Alert, Button, ButtonGroup, Indicator, LinkButton, ProgressBar, ScrollArea, Spinner, TabItem, TabList, Tabs,
 } from '@faclon-labs/fds';
-import { ArrowLeft, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { formatDuration } from '@/lib/util';
-import type { Execution, NodeResult } from '../domain/types';
+import { ArrowLeft, ChevronDown, ChevronUp, CircleStop, Pause, Play, SkipBack, SkipForward, X } from 'lucide-react';
+import type { Execution } from '../domain/types';
 import { formatRunTime } from '../engine/schedule';
 import { historyPath, linkProps } from '../lib/links';
 import { useWidthClass } from '../lib/useViewportWidth';
 import { useIoSession } from '../store/sessionStore';
 import { EXECUTION_STATUS, NODE_RUN_STATUS, SOURCE_LABEL } from '../ui/status';
-import { NodeTile } from '../ui/NodeTile';
+import { NODE_ICON } from '../ui/nodeIcons';
 import { OutputTable } from '../ui/OutputTable';
+import { inRunOrder, inputOf } from '../ui/runs';
 import { useWorkflow } from './WorkflowContext';
 
 /** The panel starts this tall and is dragged between MIN_HEIGHT and half the screen; the keyboard moves it a grid step. */
@@ -26,18 +26,6 @@ const subscribeResize = (cb: () => void) => {
 };
 const useViewportHeight = () => useSyncExternalStore(subscribeResize, () => window.innerHeight, () => DEFAULT_HEIGHT * 2);
 
-/** Nodes that ran come first, in the order they ran; the rest follow. */
-function inRunOrder(run: Execution): NodeResult[] {
-  const byId = new Map(run.nodes.map((n) => [n.nodeId, n]));
-  const ran = run.path.map((id) => byId.get(id)).filter((n): n is NodeResult => !!n);
-  return [...ran, ...run.nodes.filter((n) => !run.path.includes(n.nodeId))];
-}
-
-/** What a node received: the trigger's values (every node reads them), or the raw submission for the trigger. */
-function inputOf(run: Execution, n: NodeResult) {
-  const trigger = run.nodes.find((x) => x.nodeId === run.path[0]);
-  return n.nodeId === run.path[0] ? run.triggerData : trigger?.output;
-}
 
 /**
  * The run's logs, docked under the canvas: every node with its result on the
@@ -45,11 +33,12 @@ function inputOf(run: Execution, n: NodeResult) {
  * it runs, and a past execution opened from the history.
  */
 export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
-  const { run, setRun, inspecting, testRun, showTestRun, workflow, logNodeId, setLogNodeId } = useWorkflow();
+  const { run, setRun, inspecting, testRun, showTestRun, workflow, logNodeId, setLogNodeId, replay, startReplay, stepReplay, toggleReplay, stopReplay } = useWorkflow();
   const navigate = useNavigate();
   const width = useWidthClass();
   const [collapsed, setCollapsed] = useState(false);
-  const [view, setView] = useState('output');
+  // The Output/Input tab picked for a node; a node nobody picked for opens on its default (see `view` below).
+  const [picked, setPicked] = useState<{ nodeId: string; view: string } | null>(null);
 
   // Resizing: drag the top edge (or use the arrow keys on it), from MIN_HEIGHT up to half the screen.
   const stored = useIoSession((s) => s.logsHeight);
@@ -86,7 +75,9 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
 
   if (!run) return null;
 
-  const running = run.status === 'running';
+  // A replay draws a finished run as if it were running; it isn't a live test, so the live-only rules don't apply.
+  const running = run.status === 'running' && !replay;
+  const replayAt = replay && replay.step < replay.total ? run.nodes.find((n) => n.nodeId === run.path[replay.step])?.name : undefined;
   const narrow = width === 'xs' || width === 'sm';
   // A past run opened from History sits over this session's test run: offer the way back to it.
   const canGoBack = inspecting && !!testRun && testRun.id !== run.id;
@@ -96,10 +87,14 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
     ?? ordered.find((n) => n.nodeId === run.failedNodeId)
     ?? ordered.find((n) => n.nodeId === run.path[run.path.length - 1])
     ?? ordered[0];
+  // A failed node opens on Input: what it received is what explains the failure (its Output is empty).
+  const view = selected && picked?.nodeId === selected.nodeId ? picked.view : selected?.status === 'failed' ? 'input' : 'output';
   const status = EXECUTION_STATUS[run.status];
+  // A failed run names the node it stopped at, right after "Failed".
+  const failedAt = run.status === 'failed' ? run.nodes.find((n) => n.nodeId === run.failedNodeId)?.name : undefined;
   const summary = running
     ? 'Simulating the run…'
-    : `${SOURCE_LABEL[run.source]} · ${formatRunTime(run.startedAt)} · ${formatDuration(run.durationMs)} (simulated)`;
+    : `${SOURCE_LABEL[run.source]} · ${formatRunTime(run.startedAt)}`;
 
   return (
     <section
@@ -131,16 +126,47 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
         {canGoBack && (narrow
           ? <Button iconOnly size="sm" variant="ghost" tone="neutral" aria-label="Back to current run" leadingIcon={<ArrowLeft size={16} />} onClick={showTestRun} />
           : <Button size="sm" variant="ghost" tone="neutral" label="Back to current run" leadingIcon={<ArrowLeft size={16} />} onClick={showTestRun} />)}
-        <h2 className="BodyMediumSemibold">{inspecting ? 'Past run' : 'Test run'}</h2>
+        <h2 className="BodyMediumSemibold">{replay ? 'Replay' : inspecting ? 'Past run' : run.source === 'test' ? 'Test run' : 'Live run'}</h2>
         <div className="io-logs__state" aria-live="polite">
-          {running
-            ? <ProgressBar isIndeterminate accessibilityLabel="Test in progress" />
-            : <Indicator color={status.color}>{status.label}</Indicator>}
-          <span className="io-muted BodySmallRegular">{summary}</span>
+          {replay && replay.step < replay.total
+            ? <span className="io-logs__status BodyMediumMedium">{`Step ${replay.step + 1} of ${replay.total}`}<span className="io-muted BodySmallRegular">{replayAt}</span></span>
+            : running
+            ? <span className="io-logs__progress"><ProgressBar isIndeterminate accessibilityLabel="Test in progress" /></span>
+            : (
+              // "Failed at <node>" reads as one phrase: the node name in the Indicator label's own type, close beside it.
+              <span className="io-logs__status">
+                <Indicator color={status.color}>{status.label}</Indicator>
+                {failedAt && <span className="io-logs__where BodyMediumMedium">at {failedAt}</span>}
+              </span>
+            )}
+          <span className="io-logs__summary io-muted BodySmallRegular">{summary}</span>
         </div>
         <div className="io-logs__actions">
-          {inspecting && !running && <Button size="sm" variant="secondary" tone="neutral" label="Re-run test" onClick={() => onRetest(run)} />}
-          {!running && <LinkButton size="sm" label="History" {...linkProps(navigate, historyPath(workflow.id))} />}
+          {/* Replay: step through a finished run on the canvas. The three controls are one FDS ButtonGroup (actions). */}
+          {replay ? (
+            <>
+              <ButtonGroup variant="Tertiary" size="sm" aria-label="Replay controls">
+                <Button iconOnly aria-label="Previous step" leadingIcon={<SkipBack size={16} />} onClick={() => stepReplay(-1)} isDisabled={replay.step === 0} />
+                <Button
+                  iconOnly
+                  aria-label={replay.playing ? 'Pause replay' : replay.step >= replay.total ? 'Replay again' : 'Play replay'}
+                  leadingIcon={replay.playing ? <Pause size={16} /> : <Play size={16} />}
+                  onClick={toggleReplay}
+                />
+                <Button iconOnly aria-label="Next step" leadingIcon={<SkipForward size={16} />} onClick={() => stepReplay(1)} isDisabled={replay.step >= replay.total} />
+              </ButtonGroup>
+              {/* Icon-only on phones, so the replay controls fit beside collapse and close. */}
+              {narrow
+                ? <Button iconOnly size="sm" variant="ghost" tone="neutral" aria-label="Exit replay" leadingIcon={<CircleStop size={16} />} onClick={stopReplay} />
+                : <Button size="sm" variant="ghost" tone="neutral" label="Exit replay" onClick={stopReplay} />}
+            </>
+          ) : !running && run.path.length > 1 && (
+            narrow
+              ? <Button iconOnly size="sm" variant="secondary" tone="neutral" aria-label="Replay" leadingIcon={<Play size={16} />} onClick={() => startReplay()} />
+              : <Button size="sm" variant="secondary" tone="neutral" label="Replay" leadingIcon={<Play size={16} />} onClick={() => startReplay()} />
+          )}
+          {inspecting && !running && !replay && <Button size="sm" variant="secondary" tone="neutral" label="Re-run test" onClick={() => onRetest(run)} />}
+          {!running && !replay && <LinkButton size="sm" label="History" {...linkProps(navigate, historyPath(workflow.id))} />}
           <Button
             iconOnly
             size="sm"
@@ -151,7 +177,7 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
             leadingIcon={collapsed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             onClick={() => setCollapsed((c) => !c)}
           />
-          {!running && <Button iconOnly size="sm" variant="ghost" tone="neutral" aria-label="Close logs" leadingIcon={<X size={16} />} onClick={() => setRun(undefined)} />}
+          {!running && <Button iconOnly size="sm" variant="ghost" tone="neutral" aria-label="Close logs" leadingIcon={<X size={16} />} onClick={() => { stopReplay(); setRun(undefined); }} />}
         </div>
       </div>
 
@@ -173,8 +199,8 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
                     key={n.nodeId}
                     value={n.nodeId}
                     title={n.name}
-                    description={n.durationMs !== undefined ? `${s.label} · ${formatDuration(n.durationMs)}` : s.label}
-                    leading={<NodeTile type={n.type} size="sm" />}
+                    description={run.status === 'running' && n.status === 'not_run' ? 'Waiting' : s.label}
+                    leading={<ActionListItemIcon icon={NODE_ICON[n.type]} />}
                     trailing={n.status === 'running' ? <Spinner size="Medium" accessibilityLabel="Running" /> : <Indicator color={s.color} accessibilityLabel={s.label} />}
                   />
                 );
@@ -192,7 +218,7 @@ export function RunLogs({ onRetest }: { onRetest: (e: Execution) => void }) {
                     {selected.status !== 'failed' && selected.message && <p className="io-muted BodySmallRegular">{selected.message}</p>}
                   </div>
                   <div className="io-logs__switch">
-                    <Tabs variant="filled" size="Small" value={view} onChange={setView}>
+                    <Tabs variant="filled" size="Small" value={view} onChange={(v) => setPicked({ nodeId: selected.nodeId, view: v })}>
                       <TabList>
                         <TabItem value="output">Output</TabItem>
                         <TabItem value="input">Input</TabItem>

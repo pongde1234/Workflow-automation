@@ -6,7 +6,7 @@ import type { ExecutionStatus, NodeRunStatus, WorkflowStatus } from '../domain/t
 export const WORKFLOW_STATUS: Record<WorkflowStatus, { label: string; color: BadgeColor }> = {
   draft: { label: 'Draft', color: 'Neutral' },
   active: { label: 'Active', color: 'Positive' },
-  paused: { label: 'Inactive', color: 'Notice' },
+  paused: { label: 'Inactive', color: 'Neutral' },
 };
 
 export const EXECUTION_STATUS: Record<ExecutionStatus, { label: string; color: BadgeColor & IndicatorColor }> = {

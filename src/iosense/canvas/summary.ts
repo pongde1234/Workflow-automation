@@ -15,6 +15,16 @@ export function recipientNames(to: string[], other: string, ctx: SummaryContext)
   return [...names, ...parseAddresses(other)];
 }
 
+/**
+ * A card's one line, as plain text. Email and SMS say only who they go to: their subject or message, with its
+ * inserted values, is in the drawer (on the card it was clutter).
+ */
+export function cardSummary(node: WfNode, ctx: SummaryContext): string {
+  if (node.type !== 'email' && node.type !== 'sms') return nodeSummary(node, ctx);
+  const names = recipientNames(node.config.to, node.config.other, ctx);
+  return names.length ? `To ${names.join(', ')}` : 'No recipients yet';
+}
+
 /** "To Arjun Rao +1", or the fallback when nobody is chosen yet. */
 function toLine(names: string[]) {
   return names.length ? `To ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ''}` : 'No recipients yet';

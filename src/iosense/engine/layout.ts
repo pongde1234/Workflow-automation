@@ -1,5 +1,5 @@
 import type { Graph, WfNode, XY } from '../domain/types';
-import { edgeId, getNode, outputHandles, reachableFrom } from './graph';
+import { edgeFrom, edgeId, getNode, getTrigger, outputHandles, reachableFrom } from './graph';
 
 /** Canvas grid step and node width, in world units (match --spacing-24 and 4 × --spacing-64 + --spacing-32). */
 export const GRID = 24;
@@ -92,5 +92,110 @@ export function insertOnEdge(g: Graph, sizes: Sizes, id: string, node: WfNode): 
       { id: edgeId(a.id, edge.sourceHandle), source: a.id, sourceHandle: edge.sourceHandle, target: placed.id },
       { id: edgeId(placed.id, out), source: placed.id, sourceHandle: out, target: b.id },
     ],
+  };
+}
+
+/** Room between stacked nodes when tidying, and between separate groups of nodes. */
+const TIDY_GAP = 48;
+/** The height a free Switch output's "+" needs when tidying (a small canvas button). */
+const FREE_OUTPUT = 24;
+
+/**
+ * Tidy up: lays the flow out left to right again. Each node sits one column
+ * after the furthest node that leads to it, so no link runs backwards. Each
+ * branch gets its own band below the one before (a Switch's in condition
+ * order), and a node sits level with the middle of what follows it. Nodes the
+ * trigger doesn't reach go underneath, laid out the same way. The trigger
+ * stays where it was, so the canvas doesn't jump. One graph change: one undo.
+ */
+export function tidyLayout(g: Graph, sizes: Sizes): Graph {
+  const height = (id: string) => sizeOf(getNode(g, id)!, sizes).h;
+  const next = (id: string) => {
+    const n = getNode(g, id);
+    return n ? outputHandles(n).map((h) => edgeFrom(g, id, h)?.target).filter((t): t is string => !!t && !!getNode(g, t)) : [];
+  };
+  const trigger = getTrigger(g);
+  const fed = new Set(g.edges.map((e) => e.target));
+  const roots = [...(trigger ? [trigger.id] : []), ...g.nodes.filter((n) => n.id !== trigger?.id && !fed.has(n.id)).map((n) => n.id)];
+
+  // Columns: the longest path from a root (links never loop).
+  const col = new Map<string, number>();
+  const toColumn = (id: string, c: number) => {
+    if ((col.get(id) ?? -1) >= c) return;
+    col.set(id, c);
+    for (const t of next(id)) toColumn(t, c + 1);
+  };
+  for (const r of roots) toColumn(r, r === trigger?.id ? 0 : 1);
+
+  // Rows: each node belongs to the first node that reaches it; leaves stack down the page, a node centres on its own.
+  const kids = new Map<string, string[]>();
+  const owned = new Set<string>(roots);
+  const own = (id: string) => {
+    const mine = next(id).filter((t) => !owned.has(t));
+    mine.forEach((t) => owned.add(t));
+    kids.set(id, mine);
+    mine.forEach(own);
+  };
+  roots.forEach(own);
+  const top = new Map<string, number>();
+  let cursor = 0;
+  const place = (id: string) => {
+    const n = getNode(g, id)!;
+    const mine = kids.get(id) ?? [];
+    if (mine.length === 0) {
+      top.set(id, cursor);
+      cursor += height(id) + TIDY_GAP;
+      return;
+    }
+    // A Switch's outputs go in condition order; an output with nothing on it keeps a row of its own, so its "+"
+    // never lands on a neighbouring link's "+".
+    const middles: number[] = [];
+    const handles = n.type === 'switch' ? outputHandles(n) : [];
+    if (handles.length > 0) {
+      for (const h of handles) {
+        const target = edgeFrom(g, id, h)?.target;
+        if (target && mine.includes(target)) {
+          place(target);
+          middles.push(top.get(target)! + height(target) / 2);
+        } else if (!target) {
+          middles.push(cursor + FREE_OUTPUT / 2);
+          cursor += FREE_OUTPUT + TIDY_GAP;
+        }
+      }
+    } else {
+      for (const k of mine) {
+        place(k);
+        middles.push(top.get(k)! + height(k) / 2);
+      }
+    }
+    top.set(id, (middles[0] + middles[middles.length - 1]) / 2 - height(id) / 2);
+  };
+  for (const r of roots) {
+    place(r);
+    cursor += TIDY_GAP;
+  }
+
+  // A tall node centred on short ones can reach into the band above: push down whatever would overlap in its column.
+  const columns = new Map<number, string[]>();
+  for (const [id, c] of col) if (top.has(id)) columns.set(c, [...(columns.get(c) ?? []), id]);
+  for (const ids of columns.values()) {
+    ids.sort((a, b) => top.get(a)! - top.get(b)!);
+    let bottom = -Infinity;
+    for (const id of ids) {
+      const y = Math.max(top.get(id)!, bottom + TIDY_GAP);
+      top.set(id, y);
+      bottom = y + height(id);
+    }
+  }
+
+  const anchor = getNode(g, roots[0]);
+  if (!anchor || !top.has(anchor.id)) return g;
+  const dx = snap(anchor.position.x - col.get(anchor.id)! * (NODE_WIDTH + GAP_X));
+  const dy = snap(anchor.position.y - top.get(anchor.id)!);
+  return {
+    ...g,
+    nodes: g.nodes.map((n) => (top.has(n.id) && col.has(n.id)
+      ? { ...n, position: { x: col.get(n.id)! * (NODE_WIDTH + GAP_X) + dx, y: Math.round(top.get(n.id)!) + dy } }
+      : n)),
   };
 }

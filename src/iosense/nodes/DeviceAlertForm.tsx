@@ -1,11 +1,13 @@
 import { ActionList, ActionListItem, CounterInput, DropdownMenu, DropdownMenuOverlay, Radio, RadioGroup, SelectInput, TextInput } from '@faclon-labs/fds';
 import type { DeviceAlertNode } from '../domain/types';
 import { errorProps, type NodeFormProps } from './fields';
+import { ReadingsChart } from './ReadingsChart';
 
 export function DeviceAlertForm({ node, ctx, errorFor, touch, onConfig }: NodeFormProps<DeviceAlertNode>) {
   const c = node.config;
   const device = ctx.devices.find((d) => d.id === c.deviceId);
-  const unit = device?.parameters.find((p) => p.key === c.parameter)?.unit;
+  const reading = device?.parameters.find((p) => p.key === c.parameter);
+  const unit = reading?.unit;
 
   return (
     <>
@@ -71,9 +73,11 @@ export function DeviceAlertForm({ node, ctx, errorFor, touch, onConfig }: NodeFo
         min={0}
         max={60}
         value={c.forMinutes}
-        helpText="0 runs as soon as the reading crosses the limit; a few minutes ignores brief spikes."
+        helpText="0 runs as soon as the reading crosses the limit. A few minutes ignores brief spikes."
         onChange={({ value }) => onConfig({ forMinutes: value }, `${node.id}:for`)}
       />
+      {/* How this reading has behaved, so the limit can be set where it means something. */}
+      {device && reading && <ReadingsChart deviceId={device.id} parameter={reading} config={c} />}
       <p className="io-muted BodySmallRegular">Readings are simulated in this prototype. Test the workflow to try one.</p>
     </>
   );

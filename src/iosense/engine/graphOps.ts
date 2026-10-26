@@ -57,3 +57,30 @@ export function moveCondition(g: Graph, switchId: string, id: string, delta: -1 
     return next;
   });
 }
+
+/**
+ * The same graph with new ids for every node, Switch condition and link, so a template or an AI draft can be used
+ * any number of times. Links that leave a Switch follow their condition's new id.
+ */
+export function withFreshIds(g: Graph, newId: (prefix: string) => string): Graph {
+  const nodeIds = new Map(g.nodes.map((n) => [n.id, newId('n')]));
+  const handleIds = new Map<string, string>();
+  const nodes = g.nodes.map((n): WfNode => {
+    const id = nodeIds.get(n.id)!;
+    if (n.type !== 'switch') return { ...n, id };
+    const conditions = n.config.conditions.map((c) => {
+      const cid = newId('c');
+      handleIds.set(`${n.id}:${c.id}`, cid);
+      return { ...c, id: cid };
+    });
+    return { ...n, id, config: { ...n.config, conditions } };
+  });
+  const edges = g.edges.flatMap((e) => {
+    const source = nodeIds.get(e.source);
+    const target = nodeIds.get(e.target);
+    if (!source || !target) return [];
+    const handle = handleIds.get(`${e.source}:${e.sourceHandle}`) ?? e.sourceHandle;
+    return [{ ...e, id: edgeId(source, handle), source, sourceHandle: handle, target }];
+  });
+  return { ...g, nodes, edges };
+}

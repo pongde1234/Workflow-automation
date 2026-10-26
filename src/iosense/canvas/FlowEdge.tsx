@@ -24,6 +24,25 @@ export interface FlowEdgeData extends Record<string, unknown> {
 
 export type FlowEdgeType = Edge<FlowEdgeData, 'wf'>;
 
+/** The arrowhead a link the run took ends in (EdgeArrowDefs draws it). */
+export const TAKEN_ARROW_ID = 'io-edge-arrow-taken';
+
+/**
+ * The arrowhead for links a run took: green, pointing into the next node, its tip on the input dot's edge. Drawn
+ * once per canvas; marker contents take CSS, so its colour is a token.
+ */
+export function EdgeArrowDefs() {
+  return (
+    <svg className="io-edge-defs" aria-hidden="true" focusable="false">
+      <defs>
+        <marker id={TAKEN_ARROW_ID} viewBox="0 0 10 10" refX="16" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto">
+          <path className="io-edge__arrow" d="M 0 0 L 10 5 L 0 10 z" />
+        </marker>
+      </defs>
+    </svg>
+  );
+}
+
 /** Edges a run went along: consecutive path nodes joined by the handle that ran. */
 export function takenEdgeIds(run: Execution | undefined): Set<string> | null {
   if (!run) return null;
@@ -53,7 +72,13 @@ export const FlowEdge = memo(function FlowEdge({ id, sourceX, sourceY, targetX, 
 
   return (
     <>
-      <path d={d} className="io-edge" data-selected={data.isSelected || data.isHighlighted || undefined} data-run={data.run} />
+      <path
+        d={d}
+        className="io-edge"
+        data-selected={data.isSelected || data.isHighlighted || undefined}
+        data-run={data.run}
+        markerEnd={data.run === 'taken' ? `url(#${TAKEN_ARROW_ID})` : undefined}
+      />
       <path
         d={d}
         className="io-edge__hit"

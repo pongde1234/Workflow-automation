@@ -1,22 +1,28 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
-  Background, BackgroundVariant, ReactFlow, ReactFlowProvider, ViewportPortal, useConnection, useReactFlow, useViewport,
+  Background, BackgroundVariant, MiniMap, ReactFlow, ReactFlowProvider, ViewportPortal, useConnection, useReactFlow, useViewport,
   type NodeChange, type OnConnectEnd, type XYPosition,
 } from '@xyflow/react';
-import { Button, ButtonGroup, Card, CardBody, toastStore } from '@faclon-labs/fds';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Maximize, Minus, Plus } from 'lucide-react';
+import { Button, ButtonGroup, toastStore } from '@faclon-labs/fds';
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BrushCleaning, Maximize, ZoomIn, ZoomOut } from 'lucide-react';
 import type { Execution, Graph, Issue, NodeType, TriggerType, WfNode, XY } from '../domain/types';
-import { NODE_TYPES, TRIGGER_TYPES, type AddableType } from '../domain/nodeTypes';
+import { NODE_TYPES, type AddableType } from '../domain/nodeTypes';
 import { canConnect, edgeFrom, flowOrder, getNode, getTrigger, handleLabel, incoming, outgoing, outputHandles } from '../engine/graph';
-import { addNode, connect, disconnect, moveNode } from '../engine/graphOps';
-import { GRID, NODE_WIDTH, bounds, estimateSize, insertOnEdge, placeAfter, snap, type Sizes } from '../engine/layout';
+import { addNode, connect, disconnect, moveNode, updateNode, withFreshIds } from '../engine/graphOps';
+import { uid } from '@/lib/util';
+import { TemplatesModal } from '../templates/TemplatesModal';
+import type { WorkflowTemplate } from '../templates/templates';
+import { GRID, NODE_WIDTH, bounds, estimateSize, insertOnEdge, placeAfter, snap, tidyLayout, type Sizes } from '../engine/layout';
 import { useIoSession, type Viewport } from '../store/sessionStore';
-import { motionMs, useCoarsePointer } from '../lib/useViewportWidth';
-import { NodeTile } from '../ui/NodeTile';
-import { NodePickerModal } from './NodePickerModal';
+import { AiMark } from '@faclon-labs/fds/ai';
+import { motionMs, useCoarsePointer, useWidthClass } from '../lib/useViewportWidth';
+import { categoryOf } from '../ui/NodeTile';
+import { NodePickerDrawer } from './NodePickerDrawer';
+import { FirstStep } from './FirstStep';
+import type { NodeChange as GraphNodeChange } from '../engine/diff';
 import { CanvasActionsCtx, type CanvasActions, type NodeMenuAction } from './canvasActions';
 import { FlowNode, type FlowNodeType } from './FlowNode';
-import { FlowConnectionLine, FlowEdge, takenEdgeIds, type FlowEdgeType } from './FlowEdge';
+import { EdgeArrowDefs, FlowConnectionLine, FlowEdge, takenEdgeIds, type FlowEdgeType } from './FlowEdge';
 import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, clampZoom, fitViewport, revealBox, toWorld } from './geometry';
 import { CanvasOutline } from './CanvasOutline';
 import type { SummaryContext } from './summary';
@@ -38,10 +44,17 @@ interface CanvasProps {
   onDeleteNode: (id: string) => void;
   onConnectRequest: (id: string) => void;
   onAnnounce?: (message: string) => void;
+  /** Nodes new or edited since the last publish. */
+  changes?: Map<string, GraphNodeChange>;
 }
 
 /** Where the "Add a node" window will put the node: after an output, or on a connection. */
-type PickerTarget = { kind: 'after'; nodeId: string; handle: string } | { kind: 'insert'; edgeId: string };
+/** Minimap size in px: 3 × 2 of --spacing-64; node corners as --radius-l, in world units. */
+const MINIMAP = { width: 192, height: 128, radius: 12 };
+/** Fewer nodes than this fit on screen anyway: no minimap. */
+const MINIMAP_FROM = 4;
+
+type PickerTarget = { kind: 'trigger' } | { kind: 'after'; nodeId: string; handle: string } | { kind: 'insert'; edgeId: string };
 
 /** Breathing room around the workflow when fitting it to the view (--spacing-32). */
 const MARGIN = 32;
@@ -88,6 +101,11 @@ function FlowCanvas(p: CanvasProps) {
   const [moving, setMoving] = useState<{ id: string; origin: XY } | null>(null);
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const widthClass = useWidthClass();
+  // Phones have no room for it; small workflows don't need it; and while a run's logs take the lower half, the
+  // canvas is too short for it to sit clear of the cards.
+  const showMinimap = graph.nodes.length >= MINIMAP_FROM && widthClass !== 'xs' && widthClass !== 'sm' && !p.run;
   const hoverTimer = useRef<number | undefined>(undefined);
   const cards = useRef(new Map<string, HTMLDivElement>());
   /** A click that ends a drag shouldn't also select the node. */
@@ -117,6 +135,35 @@ function FlowCanvas(p: CanvasProps) {
     moveView(fitViewport(box, area(), MARGIN, getTrigger(graph)?.position), smooth);
   }, [graph, sizes, area, moveView]);
 
+  /** A template fills the workflow (beside anything already on it), laid out and fitted once its cards are measured. One undo step. */
+  const applyTemplate = (t: WorkflowTemplate) => {
+    setTemplatesOpen(false);
+    const fresh = withFreshIds(t.build(), uid);
+    p.onEdit((gr) => tidyLayout({ nodes: [...gr.nodes, ...fresh.nodes], edges: [...gr.edges, ...fresh.edges] }, sizes));
+    fitted.current = false;
+    p.onAnnounce?.(`Added the ${t.name} template.`);
+  };
+
+  // A draft the assistant was told to add here: placed beside anything already on the canvas, laid out, then fitted.
+  const pendingDraft = useIoSession((s) => s.pendingDraft);
+  useEffect(() => {
+    if (!pendingDraft || pendingDraft.workflowId !== p.workflowId) return;
+    const { graph: draft } = pendingDraft;
+    useIoSession.getState().setPendingDraft(null);
+    p.onEdit((gr) => tidyLayout({ nodes: [...gr.nodes, ...draft.nodes], edges: [...gr.edges, ...draft.edges] }, sizes));
+    fitted.current = false;
+    p.onAnnounce?.('Added the assistant’s draft.');
+  }, [pendingDraft]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Tidy up: lays the flow out again and fits it in view. One edit, so Ctrl/⌘+Z puts the old layout back. */
+  const tidy = () => {
+    const next = tidyLayout(graph, sizes);
+    p.onEdit(next);
+    const box = bounds(next, sizes);
+    if (box) moveView(fitViewport(box, area(), MARGIN, getTrigger(next)?.position), true);
+    p.onAnnounce?.('Tidied up the layout. Undo puts it back.');
+  };
+
   const zoomBy = (factor: number) => {
     void rf.zoomTo(clampZoom(rf.getViewport().zoom * factor), { duration: motionMs('--global-duration-quick') });
   };
@@ -143,12 +190,9 @@ function FlowCanvas(p: CanvasProps) {
     }
   }, [sizes, graph.nodes, fit]);
 
-  // Keep the selected node in view.
+  // Opening a node's drawer leaves the canvas where it is (the person asked for no movement); a node under the drawer
+  // can be panned into view by hand. Keyboard moves between nodes still bring the focused one into view.
   const selectedNodeId = p.selection?.kind === 'node' ? p.selection.id : null;
-  const selectedMeasured = !!(selectedNodeId && sizes[selectedNodeId]);
-  useEffect(() => {
-    if (selectedNodeId && selectedMeasured) reveal(selectedNodeId);
-  }, [selectedNodeId, selectedMeasured, p.rightInset]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // During a test the canvas follows the node being worked on, so the run stays in view.
   const runningNodeId = p.run?.status === 'running' ? p.run.nodes.find((n) => n.status === 'running')?.nodeId : undefined;
@@ -304,11 +348,19 @@ function FlowCanvas(p: CanvasProps) {
     p.onAnnounce?.(`Inserted ${NODE_TYPES[type].label} ‘${node.name}’ between ‘${getNode(graph, edge.source)?.name}’ and ‘${getNode(graph, edge.target)?.name}’.`);
   }, [graph, sizes, p]);
 
-  /** Puts the type chosen in the "Add a node" window where it was asked for. */
-  const pick = (type: AddableType) => {
+  /** Opens the list of steps; a node's settings close first (what was typed in them stays), so one drawer shows. */
+  const openPicker = (target: PickerTarget) => {
+    p.onSelect(null);
+    setPicker(target);
+  };
+
+  /** Puts the type chosen in the picker where it was asked for. */
+  const pick = (picked: NodeType) => {
     const target = picker;
     setPicker(null);
     if (!target) return;
+    if (target.kind === 'trigger') { addTrigger(picked as TriggerType); return; }
+    const type = picked as AddableType;
     if (target.kind === 'insert') { insertOn(target.edgeId, type); return; }
     // An output that is already connected gets the node in between.
     const existing = edgeFrom(graph, target.nodeId, target.handle);
@@ -317,7 +369,7 @@ function FlowCanvas(p: CanvasProps) {
   };
 
   const pickerContext = (() => {
-    if (!picker) return undefined;
+    if (!picker || picker.kind === 'trigger') return undefined;
     if (picker.kind === 'insert') {
       const edge = graph.edges.find((e) => e.id === picker.edgeId);
       return edge ? `Between ‘${getNode(graph, edge.source)?.name}’ and ‘${getNode(graph, edge.target)?.name}’` : undefined;
@@ -356,9 +408,15 @@ function FlowCanvas(p: CanvasProps) {
   const onMenuAction = (id: string, action: NodeMenuAction) => {
     setMenuNode(null);
     switch (action.kind) {
-      case 'add': setPicker({ kind: 'after', nodeId: id, handle: action.handle }); break;
+      case 'add': openPicker({ kind: 'after', nodeId: id, handle: action.handle }); break;
       case 'connect': p.onConnectRequest(id); break;
       case 'delete': p.onDeleteNode(id); break;
+      case 'toggleDisabled': {
+        const n = getNode(graph, id);
+        p.onEdit((gr) => updateNode(gr, id, (x) => ({ ...x, settings: { ...x.settings, disabled: !x.settings?.disabled } })));
+        if (n) p.onAnnounce?.(`‘${n.name}’ ${n.settings?.disabled ? 'enabled' : 'disabled'}.`);
+        break;
+      }
       case 'move': {
         const n = getNode(graph, id);
         if (n) setMoving({ id, origin: n.position });
@@ -419,7 +477,7 @@ function FlowCanvas(p: CanvasProps) {
     onMenuAction,
     onMenuOpenChange: (id, open) => setMenuNode(open ? id : null),
     registerCard: (id, el) => { if (el) cards.current.set(id, el); else cards.current.delete(id); },
-    onInsert: (edgeId) => setPicker({ kind: 'insert', edgeId }),
+    onInsert: (edgeId) => openPicker({ kind: 'insert', edgeId }),
     onRemoveEdge: (edgeId) => { p.onEdit((gr) => disconnect(gr, edgeId)); p.onSelect(null); setHoverEdge(null); },
     onHoverEdge: (edgeId) => {
       window.clearTimeout(hoverTimer.current);
@@ -473,8 +531,9 @@ function FlowCanvas(p: CanvasProps) {
         ? { state: connectHover.ok ? 'valid' : 'invalid', side: connectHover.side, handle: connectHover.side === 'out' ? connectHover.handle : undefined }
         : undefined,
       isMenuOpen: menuNode === n.id,
+      change: p.changes?.get(n.id),
     },
-  })), [nodesInOrder, dragging, measured, moving, ctx, selectedNodeId, runById, issueByNode, graph, connectHover, menuNode]);
+  })), [nodesInOrder, dragging, measured, moving, ctx, selectedNodeId, runById, issueByNode, graph, connectHover, menuNode, p.changes]);
 
   const taken = useMemo(() => takenEdgeIds(p.run), [p.run]);
   // While a test runs, the link into the node being worked on flows.
@@ -536,7 +595,7 @@ function FlowCanvas(p: CanvasProps) {
           // since React Flow turns pointer events off on nodes with nothing to handle them.
           onNodeClick={noop}
           onEdgeClick={(_, e) => p.onSelect({ kind: 'edge', id: e.id })}
-          onPaneClick={() => p.onSelect(null)}
+          onPaneClick={() => { p.onSelect(null); setPicker(null); }}
           defaultViewport={viewRef.current}
           onMove={(_, v) => { viewRef.current = v; }}
           minZoom={MIN_ZOOM}
@@ -559,6 +618,19 @@ function FlowCanvas(p: CanvasProps) {
           multiSelectionKeyCode={null}
         >
           <Background variant={BackgroundVariant.Dots} gap={GRID} size={2} color="var(--border-neutral-highlighted)" />
+          {/* An overview of a bigger workflow, bottom-right: drag or scroll in it to move around. Its colours come from
+              CSS (React Flow paints them as SVG attributes, which can't take tokens); it steps left of an open drawer. */}
+          {showMinimap && (
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="Workflow overview"
+              position="bottom-right"
+              nodeClassName={(n) => `io-mm io-mm--${categoryOf((n.data as FlowNodeType['data']).node.type).tone}`}
+              nodeBorderRadius={MINIMAP.radius}
+              style={{ width: MINIMAP.width, height: MINIMAP.height, marginRight: p.rightInset }}
+            />
+          )}
           {movingNode && movingSize && (
             <ViewportPortal>
               <div
@@ -579,50 +651,47 @@ function FlowCanvas(p: CanvasProps) {
 
         {!trigger && (
           <div className="io-canvas__start">
-            <div className="io-start">
-              <h2 className="HeadingMediumSemibold">Start with a trigger</h2>
-              <p className="io-muted BodyMediumRegular">A trigger decides when this workflow runs.</p>
-              <div className="io-start__choices">
-                {TRIGGER_TYPES.map((t) => (
-                  <Card key={t} size="Medium" padding={20} onClick={() => addTrigger(t)} accessibilityLabel={`Start with ${NODE_TYPES[t].label}: ${NODE_TYPES[t].description}`}>
-                    <CardBody>
-                      <div className="io-start__choice">
-                        <NodeTile type={t} size="lg" />
-                        <p className="BodyMediumSemibold">{NODE_TYPES[t].label}</p>
-                        <p className="io-muted BodySmallRegular">{NODE_TYPES[t].description}</p>
-                      </div>
-                    </CardBody>
-                  </Card>
-                ))}
-              </div>
-            </div>
+            <FirstStep
+              onAdd={() => openPicker({ kind: 'trigger' })}
+              onTemplate={() => setTemplatesOpen(true)}
+              ai={<Button variant="secondary" tone="neutral" label="Build with AI" leadingIcon={<AiMark size={16} />} onClick={() => useIoSession.getState().setAssistantOpen(true)} />}
+            />
           </div>
         )}
 
-        {graph.nodes.length > 0 && <ZoomControls onZoom={zoomBy} onFit={() => fit()} />}
+        {graph.nodes.length > 0 && <ZoomControls onZoom={zoomBy} onFit={() => fit()} onTidy={tidy} />}
 
+        <TemplatesModal isOpen={templatesOpen} onPick={applyTemplate} onDismiss={() => setTemplatesOpen(false)} />
+        <EdgeArrowDefs />
         <CanvasOutline id={outlineId} graph={graph} order={order} ctx={ctx} run={p.run} />
-        <NodePickerModal isOpen={!!picker} context={pickerContext} onPick={pick} onDismiss={() => setPicker(null)} />
+        <NodePickerDrawer
+          kind={picker ? (picker.kind === 'trigger' ? 'trigger' : 'next') : null}
+          context={pickerContext}
+          onPick={pick}
+          onDismiss={() => setPicker(null)}
+        />
       </div>
     </CanvasActionsCtx.Provider>
   );
 }
 
 /**
- * Bottom-left zoom control; only this re-renders while the view moves. The
- * three actions are one FDS ButtonGroup (Tertiary: a toolbar; md where fingers
- * point). A group takes buttons only, so the read-only level sits beside it.
+ * Bottom-left canvas controls; only this re-renders while the view moves. Fit,
+ * zoom in, zoom out and Tidy up are one FDS ButtonGroup (Tertiary: a toolbar;
+ * md where fingers point). A group takes buttons only, so the read-only zoom
+ * level sits beside it.
  */
-function ZoomControls({ onZoom, onFit }: { onZoom: (factor: number) => void; onFit: () => void }) {
+function ZoomControls({ onZoom, onFit, onTidy }: { onZoom: (factor: number) => void; onFit: () => void; onTidy: () => void }) {
   const { zoom } = useViewport();
   const coarse = useCoarsePointer();
   const pct = `${Math.round(zoom * 100)}%`;
   return (
     <div className="io-canvas__zoom">
-      <ButtonGroup variant="Tertiary" size={coarse ? 'md' : 'sm'} aria-label="Zoom">
-        <Button iconOnly aria-label="Zoom out" leadingIcon={<Minus size={16} />} onClick={() => onZoom(1 / ZOOM_STEP)} />
-        <Button iconOnly aria-label="Zoom in" leadingIcon={<Plus size={16} />} onClick={() => onZoom(ZOOM_STEP)} />
+      <ButtonGroup variant="Tertiary" size={coarse ? 'md' : 'sm'} aria-label="Canvas view">
         <Button iconOnly aria-label="Fit to view" leadingIcon={<Maximize size={16} />} onClick={onFit} />
+        <Button iconOnly aria-label="Zoom in" leadingIcon={<ZoomIn size={16} />} onClick={() => onZoom(ZOOM_STEP)} />
+        <Button iconOnly aria-label="Zoom out" leadingIcon={<ZoomOut size={16} />} onClick={() => onZoom(1 / ZOOM_STEP)} />
+        <Button iconOnly aria-label="Tidy up" leadingIcon={<BrushCleaning size={16} />} onClick={onTidy} />
       </ButtonGroup>
       <span className="io-canvas__zoom-level BodySmallMedium" aria-label={`Zoom ${pct}`}>{pct}</span>
     </div>

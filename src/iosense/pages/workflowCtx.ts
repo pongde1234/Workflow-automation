@@ -36,6 +36,15 @@ export interface WorkflowContextValue {
   testRun: Execution | undefined;
   /** Leaves the past run and shows the test run again. */
   showTestRun: () => void;
+  /** Replaying the shown run step by step (null: not replaying). `step` = total means it reached the end. */
+  replay: { step: number; total: number; playing: boolean } | null;
+  /** Replays the shown run (or the given run once it's shown) from its first step. */
+  startReplay: (runId?: string) => void;
+  /** One step back or on; pauses. */
+  stepReplay: (delta: -1 | 1) => void;
+  /** Plays or pauses; playing at the end starts again. */
+  toggleReplay: () => void;
+  stopReplay: () => void;
   /** Node shown in the run logs (null: follow the run). */
   logNodeId: string | null;
   setLogNodeId: (id: string | null) => void;

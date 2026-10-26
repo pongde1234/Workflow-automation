@@ -76,8 +76,9 @@ export function edgePath(a: XY, b: XY): string {
     return `M ${a.x} ${a.y} C ${a.x + dx} ${a.y}, ${b.x - dx} ${b.y}, ${b.x} ${b.y}`;
   }
   const dy = b.y - a.y;
-  // Within a port's radius: draw it straight (the port circle covers the difference).
-  if (Math.abs(dy) <= 6) return `M ${a.x} ${a.y} H ${b.x}`;
+  // Ends within a port's radius of each other: one straight segment from dot centre to dot centre. (Flattening it at
+  // the source's height left it meeting the target dot a few px off centre, so it looked unconnected.)
+  if (Math.abs(dy) <= 6) return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
   const x = a.x + EDGE_SPLIT;
   const s = Math.sign(dy);
   const r = Math.min(EDGE_RADIUS, Math.abs(dy) / 2, EDGE_SPLIT);
@@ -95,6 +96,6 @@ export function edgeAnchor(a: XY, b: XY): XY {
     const p2 = { x: b.x - dx, y: b.y };
     return { x: 0.125 * a.x + 0.375 * p1.x + 0.375 * p2.x + 0.125 * b.x, y: 0.125 * a.y + 0.375 * p1.y + 0.375 * p2.y + 0.125 * b.y };
   }
-  if (Math.abs(b.y - a.y) <= 6) return { x: (a.x + b.x) / 2, y: a.y };
+  if (Math.abs(b.y - a.y) <= 6) return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   return { x: (a.x + EDGE_SPLIT + b.x) / 2, y: b.y };
 }

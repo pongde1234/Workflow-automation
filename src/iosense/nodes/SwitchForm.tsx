@@ -55,6 +55,8 @@ export function SwitchForm({ node, ctx, errorFor, touch, onGraph, newId }: NodeF
               </DropdownMenu>
             </div>
 
+            {/* What to check and how, side by side; the value it's compared with under them. */}
+            <div className="io-condition__pair">
             <div data-field={`${at}.field`}>
               <DropdownMenu
                 selectionType="single"
@@ -87,6 +89,7 @@ export function SwitchForm({ node, ctx, errorFor, touch, onGraph, newId }: NodeF
                 </DropdownMenu>
               </div>
             )}
+            </div>
 
             {v && c.op && !isUnary(c.op) && (
               <div data-field={`${at}.value`}>

@@ -3,6 +3,8 @@ import { ActionList, ActionListItem, DropdownMenu, DropdownMenuOverlay, SelectIn
 import type { WorkOrderNode, WorkOrderPriority } from '../domain/types';
 import { PRIORITY_LABEL } from '../engine/nodeText';
 import { errorProps, useInsertValue, type NodeFormProps } from './fields';
+import { MessagePreview } from './MessagePreview';
+import { PersonOptionAvatar } from '../ui/People';
 
 const QUEUE = 'queue';
 const PRIORITIES = Object.keys(PRIORITY_LABEL) as WorkOrderPriority[];
@@ -48,10 +50,24 @@ export function WorkOrderForm({ node, ctx, errorFor, touch, onConfig }: NodeForm
           onChange={({ values }) => { touch('assignee'); onConfig({ assignee: !values[0] || values[0] === QUEUE ? null : values[0] }); }}
         >
           <SelectInput label="Assign to" helpText="The maintenance queue goes to the next free technician." {...errorProps(errorFor('assignee'))} />
+          {/* One pick, so each row can lead with its avatar (a multi-select's checkbox takes that slot). */}
           <DropdownMenuOverlay>
             <ActionList>
-              <ActionListItem value={QUEUE} title="Maintenance queue" description="Not assigned to anyone yet" />
-              {ctx.users.map((u) => <ActionListItem key={u.id} value={u.id} title={u.name} description={u.role} />)}
+              <ActionListItem
+                value={QUEUE}
+                title="Maintenance queue"
+                description="Not assigned to anyone yet"
+                leading={<PersonOptionAvatar person={{ key: QUEUE, name: 'Maintenance queue', kind: 'queue' }} />}
+              />
+              {ctx.users.map((u) => (
+                <ActionListItem
+                  key={u.id}
+                  value={u.id}
+                  title={u.name}
+                  description={u.role}
+                  leading={<PersonOptionAvatar person={{ key: u.id, name: u.name, kind: 'user', userId: u.id }} />}
+                />
+              ))}
             </ActionList>
           </DropdownMenuOverlay>
         </DropdownMenu>
@@ -72,6 +88,7 @@ export function WorkOrderForm({ node, ctx, errorFor, touch, onConfig }: NodeForm
         />
       </div>
 
+      <MessagePreview texts={{ Title: c.title, Description: c.description }} />
       <p className="io-muted BodySmallRegular">Work orders are simulated in this prototype. Nothing is created.</p>
     </>
   );

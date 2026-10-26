@@ -2,18 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ActionList, ActionListItem, ActionListItemIcon, ActionListSection, Button, DropdownMenu, DropdownMenuHeader,
-  DropdownMenuOverlay, DropdownMenuTrigger, Indicator, LinkButton, Switch, toastStore,
+  DropdownMenuOverlay, DropdownMenuTrigger, Indicator, LinkButton, Switch, Tooltip, toastStore,
 } from '@faclon-labs/fds';
-import { Check, CircleAlert, Ellipsis, FlaskConical, History, RotateCcw, Settings, TriangleAlert } from 'lucide-react';
+import { Check, CircleAlert, Ellipsis, FlaskConical, History, Layers, RotateCcw, TriangleAlert } from 'lucide-react';
+import { VersionsDrawer } from './VersionsDrawer';
 import { getNode } from '../engine/graph';
 import { NODE_TYPES } from '../domain/nodeTypes';
 import { hasUnpublishedChanges, useIoWorkflows } from '../store/workflowStore';
 import { useIoExecutions } from '../store/executionStore';
+import { changesText, graphChanges } from '../engine/diff';
 import { historyPath, linkProps } from '../lib/links';
 import { useWidthClass } from '../lib/useViewportWidth';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { useWorkflow } from './WorkflowContext';
-import { SettingsModal } from './SettingsModal';
 
 /**
  * Test and Publish, gated: when something must be fixed first they open the
@@ -74,8 +75,9 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
   const { workflow, editor, issues, goToNode } = useWorkflow();
   const navigate = useNavigate();
   const width = useWidthClass();
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const hasVersions = (workflow.versions?.length ?? 0) > 0;
 
   // "Saved" shows briefly after each save; while typing (unsaved or saving) it reads "Saving…".
   const [justSaved, setJustSaved] = useState(false);
@@ -95,6 +97,8 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
   const isEmpty = editor.graph.nodes.length === 0;
   const hasRuns = useIoExecutions((s) => s.executions.some((e) => e.workflowId === workflow.id));
   const showHistory = !isEmpty || hasRuns;
+  // What Publish changes would put live, for its tooltip ("1 edited · 1 new").
+  const pending = canPublish && workflow.published ? changesText(graphChanges(editor.graph, workflow.published.graph)) : null;
   // Phones: icon-only History and Test, and a bare issue count.
   const narrow = width === 'xs' || width === 'sm';
 
@@ -110,8 +114,9 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
       <ActionListItem
         key={i.id}
         value={i.id}
-        title={i.message}
-        description={node ? `${NODE_TYPES[node.type].label} · ${node.name}` : 'Workflow'}
+        // FDS menu titles stop at one line; descriptions wrap, so the message goes there in full.
+        title={node ? node.name || NODE_TYPES[node.type].defaultName : 'Workflow'}
+        description={i.message}
         leading={<ActionListItemIcon icon={i.severity === 'error' ? CircleAlert : TriangleAlert} />}
         onClick={() => { if (node) goToNode(node.id, i.field); }}
       />
@@ -180,24 +185,45 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
         {!isEmpty && (narrow
           ? <Button iconOnly variant="primary" tone="neutral" aria-label="Test workflow" leadingIcon={<FlaskConical size={16} />} isLoading={isTesting} onClick={actions.test} />
           : <Button variant="primary" tone="neutral" label="Test workflow" leadingIcon={<FlaskConical size={16} />} isLoading={isTesting} onClick={actions.test} />)}
-        {canPublish && <Button label="Publish changes" onClick={actions.publish} />}
-        <DropdownMenu>
-          <DropdownMenuTrigger>
-            <Button iconOnly variant="ghost" tone="neutral" aria-label="More workflow actions" leadingIcon={<Ellipsis size={20} />} />
-          </DropdownMenuTrigger>
-          <DropdownMenuOverlay>
-            <ActionList>
-              {narrow && showHistory && <ActionListItem title="History" value="history" leading={<ActionListItemIcon icon={History} />} onClick={() => navigate(historyPath(workflow.id))} />}
-              <ActionListItem title="Workflow settings" value="settings" leading={<ActionListItemIcon icon={Settings} />} onClick={() => setSettingsOpen(true)} />
-              {changed && (
-                <ActionListItem title="Discard unpublished changes" value="discard" intent="negative" leading={<ActionListItemIcon icon={RotateCcw} />} onClick={() => setDiscardOpen(true)} />
-              )}
-            </ActionList>
-          </DropdownMenuOverlay>
-        </DropdownMenu>
+        {canPublish && (pending
+          ? <Tooltip content={`Publishes ${pending}`}><Button label="Publish changes" onClick={actions.publish} /></Tooltip>
+          : <Button label="Publish changes" onClick={actions.publish} />)}
+        {/* ⋯ only when it has something in it: History on phones, Versions once published, Discard with unpublished changes. */}
+        {((narrow && showHistory) || changed || hasVersions) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button iconOnly variant="ghost" tone="neutral" aria-label="More workflow actions" leadingIcon={<Ellipsis size={20} />} />
+            </DropdownMenuTrigger>
+            <DropdownMenuOverlay>
+              <ActionList>
+                {narrow && showHistory && <ActionListItem title="History" value="history" leading={<ActionListItemIcon icon={History} />} onClick={() => navigate(historyPath(workflow.id))} />}
+                {hasVersions && <ActionListItem title="Versions" value="versions" leading={<ActionListItemIcon icon={Layers} />} onClick={() => setVersionsOpen(true)} />}
+                {changed && (
+                  <ActionListItem title="Discard unpublished changes" value="discard" intent="negative" leading={<ActionListItemIcon icon={RotateCcw} />} onClick={() => setDiscardOpen(true)} />
+                )}
+              </ActionList>
+            </DropdownMenuOverlay>
+          </DropdownMenu>
+        )}
       </div>
 
-      <SettingsModal isOpen={settingsOpen} onDismiss={() => setSettingsOpen(false)} />
+      <VersionsDrawer
+        workflow={workflow}
+        draft={editor.graph}
+        isOpen={versionsOpen}
+        onDismiss={() => setVersionsOpen(false)}
+        onRestore={(v) => {
+          // One edit, so Undo (here or Ctrl/⌘+Z) puts the draft back; like any edit, it goes live only through Publish changes.
+          editor.update(structuredClone(v.graph));
+          setVersionsOpen(false);
+          toastStore.show({
+            color: 'Neutral',
+            content: `Version ${v.number} restored to your draft`,
+            autoDismiss: false,
+            action: { text: 'Undo', onClick: ({ toastId }) => { editor.undo(); toastStore.dismiss(toastId); } },
+          });
+        }}
+      />
       <ConfirmModal
         isOpen={discardOpen}
         title="Discard unpublished changes?"
