@@ -5,7 +5,7 @@ import {
   CardHeaderLeading, CardHeaderTrailing, DropdownMenu, DropdownMenuOverlay, DropdownMenuSub, DropdownMenuSubContent,
   DropdownMenuSubTrigger, DropdownMenuTrigger, Indicator, Spinner,
 } from '@faclon-labs/fds';
-import { Ellipsis, Link2, Move, Plus, Trash2 } from 'lucide-react';
+import { Ellipsis, Link2, Move, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import type { NodeResult, WfNode } from '../domain/types';
 import { NODE_TYPES } from '../domain/nodeTypes';
 import { NODE_RUN_STATUS } from '../ui/status';
@@ -53,7 +53,8 @@ function StatusMark({ run, issue }: { run?: NodeResult; issue?: FlowNodeData['is
     const s = NODE_RUN_STATUS[run.status];
     return <Indicator size="Small" color={s.color} aria-live="off">{s.label}</Indicator>;
   }
-  if (issue === 'error') return <Indicator size="Small" color="Notice" aria-live="off">Needs setup</Indicator>;
+  // Not set up yet: a warning, so a Notice Badge with the warning icon (Badge R: a state that needs attention), not a bare dot.
+  if (issue === 'error') return <Badge label="Needs setup" color="Notice" leadingIcon={<TriangleAlert size={12} />} />;
   if (issue === 'unreachable') return <Indicator size="Small" color="Neutral" aria-live="off">Not connected</Indicator>;
   return null;
 }

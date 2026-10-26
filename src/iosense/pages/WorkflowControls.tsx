@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ActionList, ActionListItem, ActionListItemIcon, ActionListSection, Badge, Button, DropdownMenu, DropdownMenuHeader,
+  ActionList, ActionListItem, ActionListItemIcon, ActionListSection, Button, DropdownMenu, DropdownMenuHeader,
   DropdownMenuOverlay, DropdownMenuTrigger, Indicator, LinkButton, Switch, toastStore,
 } from '@faclon-labs/fds';
 import { Check, CircleAlert, Ellipsis, FlaskConical, History, RotateCcw, Settings, TriangleAlert } from 'lucide-react';
 import { getNode } from '../engine/graph';
 import { NODE_TYPES } from '../domain/nodeTypes';
 import { hasUnpublishedChanges, useIoWorkflows } from '../store/workflowStore';
+import { useIoExecutions } from '../store/executionStore';
 import { historyPath, linkProps } from '../lib/links';
 import { useWidthClass } from '../lib/useViewportWidth';
 import { ConfirmModal } from '../ui/ConfirmModal';
@@ -64,8 +65,10 @@ const SAVED_VISIBLE_MS = 2000;
 /**
  * The workflow's bar, above the canvas. It carries no title or back button:
  * the shell's trail names the page and links back to the list. Left: whether
- * the workflow is live, and saving. Right: issues, History, Test, Publish and
- * ⋯, the main action last before the overflow.
+ * the workflow is live, and saving. Right: issues, History, Test, Publish
+ * changes and ⋯, the main action last before the overflow. An empty workflow
+ * shows neither Test nor History: there is nothing to test or look back on yet,
+ * and the canvas says what to do first.
  */
 export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) {
   const { workflow, editor, issues, goToNode } = useWorkflow();
@@ -87,7 +90,11 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
   }, [editor.saveState]);
 
   const changed = hasUnpublishedChanges({ ...workflow, graph: editor.graph });
-  const canPublish = workflow.status === 'draft' || changed;
+  // A draft goes live from the Active switch; afterwards edits wait for Publish changes.
+  const canPublish = workflow.status !== 'draft' && changed;
+  const isEmpty = editor.graph.nodes.length === 0;
+  const hasRuns = useIoExecutions((s) => s.executions.some((e) => e.workflowId === workflow.id));
+  const showHistory = !isEmpty || hasRuns;
   // Phones: icon-only History and Test, and a bare issue count.
   const narrow = width === 'xs' || width === 'sm';
 
@@ -130,20 +137,20 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
   return (
     <div className="io-controls" role="toolbar" aria-label="Workflow">
       <div className="io-controls__group io-controls__group--status">
-        {workflow.status === 'draft' ? (
-          <Badge label="Draft" color="Neutral" />
-        ) : (
-          // Published workflows switch between Active and Paused right here (an instant toggle: no toast).
-          <span className="io-controls__active">
-            <Switch
-              size="Small"
-              accessibilityLabel="Workflow active"
-              isChecked={workflow.status === 'active'}
-              onChange={({ isChecked }) => useIoWorkflows.getState().setStatus(workflow.id, isChecked ? 'active' : 'paused')}
-            />
-            <span className="BodySmallMedium">{workflow.status === 'active' ? 'Active' : 'Paused'}</span>
-          </span>
-        )}
+        {/* Every workflow switches between Active and Inactive here. A draft has nothing live to run, so switching it on
+            publishes it (through the same checks as Publish); a published one just switches (instant, no toast). */}
+        <span className="io-controls__active">
+          <Switch
+            size="Small"
+            accessibilityLabel="Workflow active"
+            isChecked={workflow.status === 'active'}
+            onChange={({ isChecked }) => {
+              if (workflow.status === 'draft') { if (isChecked) actions.publish(); return; }
+              useIoWorkflows.getState().setStatus(workflow.id, isChecked ? 'active' : 'paused');
+            }}
+          />
+          <span className="BodySmallMedium">{workflow.status === 'active' ? 'Active' : 'Inactive'}</span>
+        </span>
         <div aria-live="polite">{saveStatus}</div>
       </div>
 
@@ -169,18 +176,18 @@ export function WorkflowControls({ actions, isTesting }: WorkflowControlsProps) 
           </DropdownMenu>
         )}
         {/* On phones History moves into ⋯ so the bar stays one row. */}
-        {!narrow && <Button variant="ghost" tone="neutral" label="History" leadingIcon={<History size={16} />} {...linkProps(navigate, historyPath(workflow.id))} />}
-        {narrow
+        {!narrow && showHistory && <Button variant="ghost" tone="neutral" label="History" leadingIcon={<History size={16} />} {...linkProps(navigate, historyPath(workflow.id))} />}
+        {!isEmpty && (narrow
           ? <Button iconOnly variant="primary" tone="neutral" aria-label="Test workflow" leadingIcon={<FlaskConical size={16} />} isLoading={isTesting} onClick={actions.test} />
-          : <Button variant="primary" tone="neutral" label="Test workflow" leadingIcon={<FlaskConical size={16} />} isLoading={isTesting} onClick={actions.test} />}
-        {canPublish && <Button label={workflow.status === 'draft' ? 'Publish' : 'Publish changes'} onClick={actions.publish} />}
+          : <Button variant="primary" tone="neutral" label="Test workflow" leadingIcon={<FlaskConical size={16} />} isLoading={isTesting} onClick={actions.test} />)}
+        {canPublish && <Button label="Publish changes" onClick={actions.publish} />}
         <DropdownMenu>
           <DropdownMenuTrigger>
             <Button iconOnly variant="ghost" tone="neutral" aria-label="More workflow actions" leadingIcon={<Ellipsis size={20} />} />
           </DropdownMenuTrigger>
           <DropdownMenuOverlay>
             <ActionList>
-              {narrow && <ActionListItem title="History" value="history" leading={<ActionListItemIcon icon={History} />} onClick={() => navigate(historyPath(workflow.id))} />}
+              {narrow && showHistory && <ActionListItem title="History" value="history" leading={<ActionListItemIcon icon={History} />} onClick={() => navigate(historyPath(workflow.id))} />}
               <ActionListItem title="Workflow settings" value="settings" leading={<ActionListItemIcon icon={Settings} />} onClick={() => setSettingsOpen(true)} />
               {changed && (
                 <ActionListItem title="Discard unpublished changes" value="discard" intent="negative" leading={<ActionListItemIcon icon={RotateCcw} />} onClick={() => setDiscardOpen(true)} />

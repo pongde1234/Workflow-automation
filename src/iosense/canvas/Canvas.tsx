@@ -519,6 +519,8 @@ function FlowCanvas(p: CanvasProps) {
         data-connecting={connectSide}
       >
         <ReactFlow<FlowNodeType, FlowEdgeType>
+          // No "React Flow" credit link in the corner (allowed by its MIT licence; its authors ask Pro subscribers to do this).
+          proOptions={{ hideAttribution: true }}
           nodes={nodes}
           edges={edges}
           nodeTypes={FLOW_NODE_TYPES}

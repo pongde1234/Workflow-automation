@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { NAV_ICON_SIZE } from '@faclon-labs/fds';
-import { CircuitBoard, Waypoints } from 'lucide-react';
+import { Waypoints } from 'lucide-react';
 import type { AppModule } from '@/lib/appModule';
 import { useIoWorkflows } from './store/workflowStore';
 
@@ -15,15 +15,10 @@ const workflowId = (pathname: string) => {
 export const iosenseModule: AppModule = {
   id: 'iosense',
   segment: 'iosense',
-  nav: [{
-    // An accordion, not a section: only accordions put the list page in a workflow's trail as a link back
-    // ("iosense / Workflow automation / Critical breakdown alerts"), so the page needs no title or back button.
-    id: 'iosense', label: 'iosense', icon: <CircuitBoard size={NAV_ICON_SIZE} />, children: [
-      { id: 'io-workflows', label: 'Workflow automation', icon: <Waypoints size={NAV_ICON_SIZE} /> },
-    ],
-  }],
+  // The app is workflow automation alone, so the rail has one item. A workflow's trail
+  // ("Workflow automation / Critical breakdown alerts", the first crumb a link back) is built in App.tsx.
+  nav: [{ id: 'io-workflows', label: 'Workflow automation', icon: <Waypoints size={NAV_ICON_SIZE} /> }],
   pages: { 'io-workflows': { title: 'Workflow automation', path: '/iosense/workflows' } },
-  landing: { iosense: 'io-workflows' },
   useRecord: (pathname) => {
     const id = workflowId(pathname);
     const name = useIoWorkflows((s) => (id ? s.workflows.find((w) => w.id === id)?.name : undefined));

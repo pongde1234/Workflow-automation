@@ -26,9 +26,10 @@ function Shell() {
   const activeId = mod.activeId?.(pathname) ?? Object.keys(mod.pages)[0];
   const layout = mod.layout?.(pathname);
 
-  // A workflow's trail is "iosense / Workflow automation / its name"; the list page's id is the record's parent.
+  // A workflow's trail is "Workflow automation / its name", the first crumb a link back to the list. Built by hand:
+  // with a flat rail, buildTrail drops the parent of a record page.
   let trail = record
-    ? buildTrail(record.parent, record.title, { items: NAV, pageTitles: PAGE_TITLES, recordParent: { [record.parent]: record.parent } })
+    ? [{ label: PAGE_TITLES[record.parent] ?? '', id: record.parent }, { label: record.title }]
     : buildTrail(activeId, PAGE_TITLES[activeId] ?? '', { items: NAV, pageTitles: PAGE_TITLES });
   // Phones: the top bar has room for one crumb.
   if (isPhone && trail.length > 1) trail = trail.slice(-1);

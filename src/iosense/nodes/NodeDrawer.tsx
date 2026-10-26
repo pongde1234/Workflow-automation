@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Badge, Button, Drawer, DrawerBody, DrawerFooter, DrawerHeader, TextInput } from '@faclon-labs/fds';
+import { Alert, Badge, Button, Drawer, DrawerBody, DrawerFooter, DrawerHeader, TextInput, Tooltip } from '@faclon-labs/fds';
+import { Trash2 } from 'lucide-react';
 import { uid } from '@/lib/util';
 import type {
   DelayNode, DeviceAlertNode, EmailNode, Graph, IoFormsNode, ReportNode, SchedulerNode, SmsNode, SwitchNode, WfNode, WorkOrderNode,
@@ -23,8 +24,10 @@ import { ReportForm } from './ReportForm';
 
 /**
  * The selected node's configuration in the stock FDS Drawer (its defaults:
- * popup variant, scrim, focus kept inside; Esc or a click outside closes it).
- * Edits apply immediately and are autosaved and undoable.
+ * popup variant, scrim, focus kept inside). Edits show on the canvas as you
+ * type; Submit keeps them, and Cancel (or ✕, Esc, a click outside) puts the
+ * node back as it was when the drawer opened. A node that isn't set up yet can
+ * still be submitted: the drawer says what's missing and the card shows it.
  */
 export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
   const { editor, selection, setSelection, ctx, issues, showAllErrors, focusField, setFocusField, run } = useWorkflow();
@@ -40,13 +43,32 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
 
   useEffect(() => setTouched(new Set()), [node?.id]);
 
+  // The graph as it was when this node's drawer opened: what Cancel goes back to.
+  const opened = useRef<{ id: string; graph: Graph } | null>(null);
+  useEffect(() => {
+    if (!selected) opened.current = null;
+    else if (opened.current?.id !== selected.id) opened.current = { id: selected.id, graph: editor.latest.current };
+  }, [selected?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const cancel = () => {
+    const before = opened.current;
+    if (before && editor.latest.current !== before.graph) editor.update(before.graph);
+    setSelection(null);
+  };
+  const submit = () => {
+    editor.flush();
+    setSelection(null);
+  };
+
   // "Go to node" from the Issues menu or a failed run: focus the field in question.
   useEffect(() => {
     if (!selected || !focusField) return;
     const t = window.setTimeout(() => {
       const el = bodyRef.current?.querySelector<HTMLElement>(`[data-field="${focusField}"] input, [data-field="${focusField}"] textarea, [data-field="${focusField}"] button`);
       el?.focus();
-      setTouched((s) => new Set(s).add(focusField));
+      // Arriving from the Issues menu shows every field that still needs something, not just the one clicked.
+      const missing = issues.filter((i) => i.nodeId === selected.id && i.severity === 'error' && i.field).map((i) => i.field!);
+      setTouched((s) => new Set([...s, focusField, ...missing]));
       setFocusField(null);
     }, 50);
     return () => window.clearTimeout(t);
@@ -60,9 +82,9 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
     : undefined);
   const touch = (field: string) => setTouched((s) => (s.has(field) ? s : new Set(s).add(field)));
   const fieldless = nodeIssues.filter((i) => i.severity === 'error' && !i.field);
+  const unset = nodeIssues.filter((i) => i.severity === 'error' && i.field);
   const warnings = nodeIssues.filter((i) => i.severity === 'warning');
   const result = run?.nodes.find((r) => r.nodeId === node.id);
-  const hasErrors = nodeIssues.some((i) => i.severity === 'error');
 
   const props = {
     ctx,
@@ -74,18 +96,32 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
   };
 
   return (
-    <Drawer isOpen={!!selected} onDismiss={() => setSelection(null)} initialFocusRef={nameRef}>
+    <Drawer isOpen={!!selected} onDismiss={cancel} initialFocusRef={nameRef}>
       <DrawerHeader
         title={node.name || def.defaultName}
         subtitle={def.label}
         leading={<NodeTile type={node.type} size="xs" />}
-        titleSuffix={result ? <Badge label={NODE_RUN_STATUS[result.status].label} color={NODE_RUN_STATUS[result.status].color} />
-          : hasErrors ? <Badge label="Needs setup" color="Notice" /> : undefined}
+        titleSuffix={result ? <Badge label={NODE_RUN_STATUS[result.status].label} color={NODE_RUN_STATUS[result.status].color} /> : undefined}
+        // Delete sits beside ✕ (Drawer R18), out of the way of Submit; Undo follows in a toast.
+        trailing={(
+          <Tooltip content="Delete node">
+            <Button iconOnly variant="ghost" tone="neutral" aria-label="Delete node" leadingIcon={<Trash2 size={16} />} onClick={() => onDelete(node.id)} />
+          </Tooltip>
+        )}
       />
       <DrawerBody>
         <div className="io-form" ref={bodyRef}>
           {result?.status === 'failed' && result.message && (
             <Alert color="Negative" isDismissible={false} isFullWidth title="Failed in the last run" description={result.message} />
+          )}
+          {unset.length > 0 && (
+            <Alert
+              color="Notice"
+              isDismissible={false}
+              isFullWidth
+              title="This node isn’t set up yet"
+              description={unset.map((i) => i.message).join(' ')}
+            />
           )}
           {fieldless.map((i) => <Alert key={i.id} color="Negative" isDismissible={false} isFullWidth description={i.message} />)}
           {warnings.length > 0 && (
@@ -114,9 +150,10 @@ export function NodeDrawer({ onDelete }: { onDelete: (id: string) => void }) {
           {node.type === 'report' && <ReportForm node={node} {...(props as Omit<NodeFormProps<ReportNode>, 'node'>)} />}
         </div>
       </DrawerBody>
-      {/* Out of the form's flow, pinned to the bottom: the drawer's one action (FDS DrawerFooter). Undo follows in a toast. */}
+      {/* Pinned to the bottom (FDS DrawerFooter): Cancel as a neutral primary beside Submit (Button pairing rule). */}
       <DrawerFooter>
-        <Button variant="secondary" tone="negative" label="Delete node" onClick={() => onDelete(node.id)} />
+        <Button variant="primary" tone="neutral" label="Cancel" onClick={cancel} />
+        <Button variant="primary" label="Submit" onClick={submit} />
       </DrawerFooter>
     </Drawer>
   );

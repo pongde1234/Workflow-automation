@@ -55,22 +55,26 @@ export function NodePickerModal({ isOpen, context, onPick, onDismiss }: NodePick
           ) : (
             <div className="io-picker__columns" data-narrow={narrow || undefined}>
               {columns.map((sections) => (
-                <ActionList key={sections[0].id} accessibilityLabel={sections.map((s) => s.title).join(' and ')}>
+                // One list per section: ActionList draws a divider between its own sections, which would
+                // run across only one column. The headings already separate the groups.
+                <div key={sections[0].id} className="io-picker__column">
                   {sections.map((s) => (
-                    <ActionListSection key={s.id} title={s.title}>
-                      {s.types.map((t) => (
-                        <ActionListItem
-                          key={t}
-                          value={t}
-                          title={NODE_TYPES[t].label}
-                          description={NODE_TYPES[t].description}
-                          leading={<NodeTile type={t} />}
-                          onClick={() => onPick(t)}
-                        />
-                      ))}
-                    </ActionListSection>
+                    <ActionList key={s.id} accessibilityLabel={s.title}>
+                      <ActionListSection title={s.title}>
+                        {s.types.map((t) => (
+                          <ActionListItem
+                            key={t}
+                            value={t}
+                            title={NODE_TYPES[t].label}
+                            description={NODE_TYPES[t].description}
+                            leading={<NodeTile type={t} />}
+                            onClick={() => onPick(t)}
+                          />
+                        ))}
+                      </ActionListSection>
+                    </ActionList>
                   ))}
-                </ActionList>
+                </div>
               ))}
             </div>
           )}

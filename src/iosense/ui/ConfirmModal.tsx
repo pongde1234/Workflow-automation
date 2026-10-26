@@ -18,7 +18,7 @@ export function ConfirmModal({ isOpen, title, message, confirmLabel, onConfirm, 
     <Modal isOpen={isOpen} onDismiss={onDismiss} size="sm">
       <ModalHeader title={title} />
       <ModalBody>
-        <p className="BodyMediumRegular">{message}</p>
+        <p className="io-confirm BodyMediumRegular">{message}</p>
       </ModalBody>
       <ModalFooter>
         <Button variant="primary" tone="neutral" label="Cancel" onClick={onDismiss} />
